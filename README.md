@@ -30,6 +30,6 @@ optional arguments:
 ## ToDo
 - [x] Input thread
 - [x] Output thread
-- [ ] Input formatting
-- [ ] Output parsing
+- [x] Input formatting
+- [x] Output parsing
 - [ ] File I/O support

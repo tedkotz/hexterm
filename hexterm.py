@@ -13,24 +13,45 @@ LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
 OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.'''
 
+DESCRIPTION = "Raw hexadecimal based terminal emulator for monitoring binary serial interfaces"
+
 import argparse
 import serial
-import threading
 import sys
+import threading
 import time
 
 
-def ConvertBytes2String(mybytes):
-    return mybytes.decode()
+def makeprintable( s: str ) -> str:
+    if (s.isprintable()):
+        return s
+    else:
+        return "."
 
-def ConvertString2Bytes(mystring):
-    return mystring.encode()
+def format8bytes( b : bytes ) -> str:
+    return b.hex(sep=' ').upper().ljust(24)
+
 
 class HexTerm:
 
     def __init__(self, args: dict):
         self.args = args
         self.running = False
+
+    def ConvertBytes2String(self, mybytes: bytes) -> str:
+        return format8bytes(mybytes[0:8]) + " " + format8bytes(mybytes[8:16]) + " |" +"".join(map( makeprintable, mybytes.decode(encoding=self.args.encoding,errors='replace'))).ljust(16)+"|"
+
+    def ConvertString2Bytes(self, mystring: str) -> bytes:
+        try:
+            if (mystring[0] == "'"):
+                return mystring.split(sep="'")[1].encode(encoding=self.args.encoding)
+            elif (mystring[0] == '"'):
+                return mystring.split(sep='"')[1].encode(encoding=self.args.encoding)
+            else:
+                return bytes.fromhex(mystring)
+        except Exception as e:
+            print (e)
+        return b""
 
     def Char2BytesLoop(self):
         # print("entering C2B")
@@ -40,23 +61,26 @@ class HexTerm:
             if line[0].upper() == "Q":
                 self.running=False
             else:
-                self.writeByte(ConvertString2Bytes(line))
+                self.writeByte(self.ConvertString2Bytes(line))
 
     def Bytes2CharLoop(self):
         # print("entering B2C")
-        count=0
+        timestamp = time.time()
+        data = bytearray()
         while self.running:
             #time.sleep(1)
             newByte = self.readByte()
+            currTime = time.time()
             if (newByte is None) or (newByte == b""):
                 pass
-            elif count < 16:
-                self.output(ConvertBytes2String(newByte)+" ")
-                self.outputFlush()
-                count += 1
             else:
-                self.output(ConvertBytes2String(newByte)+"\n")
-                count=0
+                if len(data) == 0:
+                    timestamp = currTime
+                data = data + newByte
+            if (len(data) > 16) or ((len(data) > 0) and (currTime - timestamp) > 1):
+                self.output("  "+self.ConvertBytes2String(data[0:16])+"\n")
+                data = data[16:]
+                timestamp = currTime
 
     def mainloop(self) -> int:
         # print("entering main loop")
@@ -91,8 +115,8 @@ class HexTerm:
         print(self.args)
 
         # create Serial Device
-        with serial.Serial(self.args.portname, self.args.baud, timeout=1) as port:
-            self.readByte=lambda : port.read(1)
+        with serial.Serial(self.args.portname, self.args.baud, timeout=320/self.args.baud) as port:
+            self.readByte=lambda : port.read(16)
             self.writeByte=lambda b : port.write(b); port.flush()
             return self.createInput()
 
@@ -102,15 +126,17 @@ class HexTerm:
 
 def main() -> int:
     global LICENSE
+    global DESCRIPTION
     parser = argparse.ArgumentParser(
                     formatter_class=argparse.RawDescriptionHelpFormatter,
-                    description = "Raw hexadecimal based terminal emulator for monitoring binary serial interfaces",
+                    description = DESCRIPTION,
                     epilog = LICENSE)
 
-    parser.add_argument('portname',                            metavar='PORT',                                help='uses named PORT')
-    parser.add_argument('-b','--baud','--speed',               metavar='BAUDRATE',  type=int, default=9600,   help='sets the ports BUADRATE, default 9600')
-    parser.add_argument('-f','--framing',                      metavar='8N1',                 default="8N1",  help='sets framing parameters in <DATABITS><PARITY><STOPBITS> form, default 8N1')
-    parser.add_argument('-c','--flow-control','--control',     metavar='METHOD',              default="None", help='sets flow control METHOD [HW:(RTS/CTS), SW:(XON/XOFF), None:(default)]')
+    parser.add_argument('portname',                            metavar='PORT',                                 help='uses named PORT')
+    parser.add_argument('-b','--baud','--speed',               metavar='BAUDRATE',  type=int, default=9600,    help='sets the ports BUADRATE, default 9600')
+    parser.add_argument('-f','--framing',                      metavar='8N1',                 default="8N1",   help='sets framing parameters in <DATABITS><PARITY><STOPBITS> form, default 8N1')
+    parser.add_argument('-c','--flow-control','--control',     metavar='METHOD',              default="None",  help='sets flow control METHOD [HW:(RTS/CTS), SW:(XON/XOFF), None:(default)]')
+    parser.add_argument('-e','--encoding',                     metavar='CODEC',               default="cp437", help='sets encoding CODEC(ascii, latin-1, utf-8, etc), default cp437')
 
     args = parser.parse_args()
 
