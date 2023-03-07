@@ -134,9 +134,9 @@ def main() -> int:
 
     parser.add_argument('portname',                            metavar='PORT',                                 help='uses named PORT')
     parser.add_argument('-b','--baud','--speed',               metavar='BAUDRATE',  type=int, default=9600,    help='sets the ports BUADRATE, default 9600')
-    parser.add_argument('-f','--framing',                      metavar='8N1',                 default="8N1",   help='sets framing parameters in <DATABITS><PARITY><STOPBITS> form, default 8N1')
     parser.add_argument('-c','--flow-control','--control',     metavar='METHOD',              default="None",  help='sets flow control METHOD [HW:(RTS/CTS), SW:(XON/XOFF), None:(default)]')
     parser.add_argument('-e','--encoding',                     metavar='CODEC',               default="cp437", help='sets encoding CODEC(ascii, latin-1, utf-8, etc), default cp437')
+    parser.add_argument('-f','--framing',                      metavar='8N1',                 default="8N1",   help='sets framing parameters in <DATABITS><PARITY><STOPBITS> form, default 8N1')
 
     args = parser.parse_args()
 
