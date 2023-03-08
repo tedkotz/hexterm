@@ -32,29 +32,42 @@ def format8bytes( b : bytes ) -> str:
     return b.hex(sep=' ').upper().ljust(24)
 
 
+
 class HexTerm:
 
-    def __init__(self, args: dict):
+    def __init__(self, args: 'argparse.Namespace'):
         self.args = args
         self.running = False
 
     def ConvertBytes2String(self, mybytes: bytes) -> str:
         return format8bytes(mybytes[0:8]) + " " + format8bytes(mybytes[8:16]) + " |" +"".join(map( makeprintable, mybytes.decode(encoding=self.args.encoding,errors='replace'))).ljust(16)+"|"
 
+    def parseBytes(self, s: str ) -> bytes:
+        if (not isinstance(s, str)):
+            return b""
+        s = s.lstrip()
+        if (s == ""):
+            return b""
+
+        if (s[0] in "0123456789abcdefABCDEF"):
+            return bytes.fromhex(s[0:2]) + self.parseBytes(s[2:])
+        elif ("'"==s[0]):
+            l = s.split(sep="'", maxsplit=3) + [""]
+            return l[1].encode(encoding=self.args.encoding) + self.parseBytes(l[2])
+        elif ('"'==s[0]):
+            l = s.split(sep='"', maxsplit=3) + [""]
+            return l[1].encode(encoding=self.args.encoding) + self.parseBytes(l[2])
+        else:
+            raise Exception("Syntax Error")
+
     def ConvertString2Bytes(self, mystring: str) -> bytes:
         try:
-            if (mystring[0] == "'"):
-                return mystring.split(sep="'")[1].encode(encoding=self.args.encoding)
-            elif (mystring[0] == '"'):
-                return mystring.split(sep='"')[1].encode(encoding=self.args.encoding)
-            else:
-                return bytes.fromhex(mystring)
+            return self.parseBytes(mystring)
         except Exception as e:
             print (e)
         return b""
 
     def Char2BytesLoop(self):
-        # print("entering C2B")
         while self.running:
             #time.sleep(1)
             line = self.readline()
@@ -64,7 +77,6 @@ class HexTerm:
                 self.writeByte(self.ConvertString2Bytes(line))
 
     def Bytes2CharLoop(self):
-        # print("entering B2C")
         timestamp = time.time()
         data = bytearray()
         while self.running:
@@ -83,7 +95,6 @@ class HexTerm:
                 timestamp = currTime
 
     def mainloop(self) -> int:
-        # print("entering main loop")
         b2c = threading.Thread(target=self.Bytes2CharLoop)
         c2b = threading.Thread(target=self.Char2BytesLoop)
 
@@ -112,7 +123,8 @@ class HexTerm:
 
     def run(self) -> int:
         self.running = True
-        print(self.args)
+        print(str(self.args).replace("Namespace","Settings",1))
+        print("Type 'quit' to exit")
 
         # create Serial Device
         with serial.Serial(self.args.portname, self.args.baud, timeout=320/self.args.baud) as port:
