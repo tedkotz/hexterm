@@ -20,6 +20,7 @@ import serial
 import sys
 import threading
 import time
+import re
 
 
 def makeprintable( s: str ) -> str:
@@ -32,12 +33,44 @@ def format8bytes( b : bytes ) -> str:
     return b.hex(sep=' ').upper().ljust(24)
 
 
+def determineSerialByteSize( bs: str )-> 'serial.ByteSize':
+    ByteSizes = { "5": serial.FIVEBITS, "6": serial.SIXBITS, "7": serial.SEVENBITS, "8": serial.EIGHTBITS }
+    return ByteSizes.get(bs)
+
+def determineSerialParity( p: str ) -> 'serial.Parity':
+    Parities = { "N":serial.PARITY_NONE, "E":serial.PARITY_EVEN, "O":serial.PARITY_ODD, "M":serial.PARITY_MARK, "S":serial.PARITY_SPACE }
+    return Parities.get(p)
+
+def determineSerialStopBits( sb: str ) -> 'serial.StopBits':
+    StopBits = { "1":serial.STOPBITS_ONE, "1.5":serial.STOPBITS_ONE_POINT_FIVE, "2":serial.STOPBITS_TWO }
+    return StopBits[sb]
+
+def parseSerialFraming( settings: str) -> ['serial.ByteSize', 'serial.Parity', 'serial.StopBits']:
+    match = re.match(r"([5-8])([EMNOS])((1\.5)|2|1)", settings.upper())
+    if match is None:
+        raise Exception( "Framing settings parse error in '{}'.".format( settings ) )
+    return determineSerialByteSize(match.group(1)), determineSerialParity(match.group(2)), determineSerialStopBits(match.group(3))
+
+
+def parseSerialFlowControl( flowControl: str ) -> [bool('xonxoff'), bool('rtscts'), bool('dsrdtr')]:
+    s = flowControl.upper()
+    if s == "NONE":
+        return False, False, False
+    elif s == "SW":
+        return True, False, False
+    elif s == "HW" or s == "RTS":
+        return False, True, False
+    elif s == "DSR":
+        return False, False, True
+    elif s == "ALL":
+        return True, True, True
+    raise Exception( "Flow Control settings parse error in '{}'.".format( flowControl ) )
 
 class HexTerm:
 
     def __init__(self, args: 'argparse.Namespace'):
         self.args = args
-        self.running = False
+        self.shutdown = threading.Event()
 
     def ConvertBytes2String(self, mybytes: bytes) -> str:
         return format8bytes(mybytes[0:8]) + " " + format8bytes(mybytes[8:16]) + " |" +"".join(map( makeprintable, mybytes.decode(encoding=self.args.encoding,errors='replace'))).ljust(16)+"|"
@@ -68,18 +101,18 @@ class HexTerm:
         return b""
 
     def Char2BytesLoop(self):
-        while self.running:
+        while not self.shutdown.is_set():
             #time.sleep(1)
             line = self.readline()
             if line[0].upper() == "Q":
-                self.running=False
+                self.shutdown.set()
             else:
                 self.writeByte(self.ConvertString2Bytes(line))
 
     def Bytes2CharLoop(self):
         timestamp = time.time()
         data = bytearray()
-        while self.running:
+        while not self.shutdown.is_set():
             #time.sleep(1)
             newByte = self.readByte()
             currTime = time.time()
@@ -104,9 +137,9 @@ class HexTerm:
 
         # wait for join.
         b2c.join()
-        self.running = False
+        self.shutdown.set()
         c2b.join()
-        self.running = False
+        self.shutdown.set()
 
         print("Exiting")
         return 0
@@ -122,17 +155,20 @@ class HexTerm:
         return self.createOutput()
 
     def run(self) -> int:
-        self.running = True
+        self.shutdown.clear()
         print(str(self.args).replace("Namespace","Settings",1))
         print("Type 'quit' to exit")
 
         # create Serial Device
-        with serial.Serial(self.args.portname, self.args.baud, timeout=320/self.args.baud) as port:
+
+        bytesize, parity, stopbits = parseSerialFraming(self.args.framing)
+        xonxoff, rtscts, dsrdtr = parseSerialFlowControl(self.args.flow_control)
+        with serial.Serial(port=self.args.portname, baudrate=self.args.baud, bytesize=bytesize, parity=parity, stopbits=stopbits, xonxoff=xonxoff, rtscts=rtscts, dsrdtr=dsrdtr, timeout=320/self.args.baud) as port:
             self.readByte=lambda : port.read(16)
             self.writeByte=lambda b : port.write(b); port.flush()
             return self.createInput()
 
-        self.running = False
+        self.shutdown.set()
         return -1
 
 
@@ -148,14 +184,13 @@ def main() -> int:
     parser.add_argument('-b','--baud','--speed',               metavar='BAUDRATE',  type=int, default=9600,    help='sets the ports BUADRATE, default 9600')
     parser.add_argument('-c','--flow-control','--control',     metavar='METHOD',              default="None",  help='sets flow control METHOD [HW:(RTS/CTS), SW:(XON/XOFF), None:(default)]')
     parser.add_argument('-e','--encoding',                     metavar='CODEC',               default="cp437", help='sets encoding CODEC(ascii, latin-1, utf-8, etc), default cp437')
-    parser.add_argument('-f','--framing',                      metavar='8N1',                 default="8N1",   help='sets framing parameters in <DATABITS><PARITY><STOPBITS> form, default 8N1')
+    parser.add_argument('-f','--framing',                      metavar='8N1',                 default="8N1",   help='sets framing parameters in <DATABITS[5-8]> <PARITY[EMNOS]> <STOPBITS[1,1.5,2]> form, default 8N1')
 
     args = parser.parse_args()
 
     hexterm = HexTerm( args )
 
     return hexterm.run()
-
 
 
 if __name__ == '__main__':

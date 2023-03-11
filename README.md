@@ -34,6 +34,7 @@ optional arguments:
 - [x] Input formatting
 - [x] Output parsing
 - [ ] File I/O support
-- [ ] Mixed hex and string input
-- [ ] Use serial parameters
+- [x] Mixed hex and string input
+- [x] Use serial parameters
 - [ ] Add doc strings to all functions
+- [ ] Add `help` command
