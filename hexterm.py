@@ -104,7 +104,8 @@ class HexTerm:
         while not self.shutdown.is_set():
             #time.sleep(1)
             line = self.readline()
-            if line[0].upper() == "Q":
+            # EOF or quit
+            if line == "" or line[0].upper() == "Q":
                 self.shutdown.set()
             else:
                 self.writeByte(self.ConvertString2Bytes(line))
@@ -146,13 +147,25 @@ class HexTerm:
 
 
     def createOutput(self) -> int:
-        self.output = sys.stdout.write
-        self.outputFlush = sys.stdout.flush
-        return self.mainloop()
+        if self.args.output == "-":
+            self.output = sys.stdout.write
+            self.outputFlush = sys.stdout.flush
+            return self.mainloop()
+        else:
+            with open(self.args.output, "a+") as outfile:
+                self.output = outfile.write
+                self.outputFlush = outfile.flush
+                return self.mainloop()
 
     def createInput(self) -> int:
-        self.readline = sys.stdin.readline
-        return self.createOutput()
+        if self.args.input == "-":
+            self.readline = sys.stdin.readline
+            return self.createOutput()
+        else:
+            with open(self.args.input, "r") as infile:
+                self.readline = infile.readline
+                return self.createOutput()
+
 
     def run(self) -> int:
         self.shutdown.clear()
@@ -185,6 +198,8 @@ def main() -> int:
     parser.add_argument('-c','--flow-control','--control',     metavar='METHOD',              default="None",  help='sets flow control METHOD [HW:(RTS/CTS), SW:(XON/XOFF), None:(default)]')
     parser.add_argument('-e','--encoding',                     metavar='CODEC',               default="cp437", help='sets encoding CODEC(ascii, latin-1, utf-8, etc), default cp437')
     parser.add_argument('-f','--framing',                      metavar='8N1',                 default="8N1",   help='sets framing parameters in <DATABITS[5-8]> <PARITY[EMNOS]> <STOPBITS[1,1.5,2]> form, default 8N1')
+    parser.add_argument('-i','--input',                        metavar='FILENAME',            default="-",     help='input is read from FILENAME')
+    parser.add_argument('-o','--output',                       metavar='FILENAME',            default="-",     help='output is appended to FILENAME')
 
     args = parser.parse_args()
 

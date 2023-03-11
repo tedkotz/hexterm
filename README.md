@@ -3,7 +3,9 @@ A raw hexadecimal based terminal emulator for monitoring binary serial interface
 
 ## Usage
 ```
-usage: hexterm.py [-h] [-b BAUDRATE] [-c METHOD] [-e CODEC] [-f 8N1] PORT
+usage: hexterm.py [-h] [-b BAUDRATE] [-c METHOD] [-e CODEC] [-f 8N1]
+                  [-i FILENAME] [-o FILENAME]
+                  PORT
 
 Raw hexadecimal based terminal emulator for monitoring binary serial interfaces
 
@@ -19,8 +21,11 @@ optional arguments:
   -e CODEC, --encoding CODEC
                         sets encoding CODEC(ascii, latin-1, utf-8, etc), default cp437
   -f 8N1, --framing 8N1
-                        sets framing parameters in <DATABITS><PARITY><STOPBITS> form, default 8N1
-
+                        sets framing parameters in <DATABITS[5-8]> <PARITY[EMNOS]> <STOPBITS[1,1.5,2]> form, default 8N1
+  -i FILENAME, --input FILENAME
+                        input is read from FILENAME
+  -o FILENAME, --output FILENAME
+                        output is appended to FILENAME
 ```
 
 ## Dependencies
@@ -33,8 +38,9 @@ optional arguments:
 - [x] Output thread
 - [x] Input formatting
 - [x] Output parsing
-- [ ] File I/O support
+- [x] File I/O support
 - [x] Mixed hex and string input
 - [x] Use serial parameters
 - [ ] Add doc strings to all functions
 - [ ] Add `help` command
+- [ ] Add I/O processing delay in script modes
