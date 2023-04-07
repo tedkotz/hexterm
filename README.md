@@ -43,4 +43,8 @@ optional arguments:
 - [x] Use serial parameters
 - [ ] Add doc strings to all functions
 - [ ] Add `help` command
+- [ ] Add `--encoding help`
+- [ ] Add `--flow-control help`
+- [ ] Add `--framing help`
+- [ ] Standardize CLI options and descriptions a little (dd, gcc, cu, minicom)
 - [ ] Add I/O processing delay in script modes
