@@ -35,20 +35,21 @@ def format8bytes( b : bytes ) -> str:
 
 def determineSerialByteSize( bs: str )-> 'serial.ByteSize':
     ByteSizes = { "5": serial.FIVEBITS, "6": serial.SIXBITS, "7": serial.SEVENBITS, "8": serial.EIGHTBITS }
-    return ByteSizes.get(bs)
+    return ByteSizes.get(bs, serial.EIGHTBITS)
 
 def determineSerialParity( p: str ) -> 'serial.Parity':
     Parities = { "N":serial.PARITY_NONE, "E":serial.PARITY_EVEN, "O":serial.PARITY_ODD, "M":serial.PARITY_MARK, "S":serial.PARITY_SPACE }
-    return Parities.get(p)
+    return Parities.get(p, serial.PARITY_NONE)
 
 def determineSerialStopBits( sb: str ) -> 'serial.StopBits':
     StopBits = { "1":serial.STOPBITS_ONE, "1.5":serial.STOPBITS_ONE_POINT_FIVE, "2":serial.STOPBITS_TWO }
-    return StopBits[sb]
+    return StopBits.get(sb, serial.STOPBITS_ONE)
 
 def parseSerialFraming( settings: str) -> ['serial.ByteSize', 'serial.Parity', 'serial.StopBits']:
-    match = re.match(r"([5-8])([EMNOS])((1\.5)|2|1)", settings.upper())
+    match = re.fullmatch(r"^([5-8]?)([EMNOS]?)((1\.5)|2|1?)$", settings.strip().upper())
     if match is None:
         raise Exception( "Framing settings parse error in '{}'.".format( settings ) )
+    print (match.group(0,1,2,3))
     return determineSerialByteSize(match.group(1)), determineSerialParity(match.group(2)), determineSerialStopBits(match.group(3))
 
 
