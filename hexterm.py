@@ -16,41 +16,70 @@ PERFORMANCE OF THIS SOFTWARE.'''
 DESCRIPTION = "Raw hexadecimal based terminal emulator for monitoring binary serial interfaces"
 
 import argparse
-import serial
+import re
 import sys
 import threading
 import time
-import re
 
+import serial
 
 def makeprintable( s: str ) -> str:
-    if (s.isprintable()):
+    if s.isprintable():
         return s
     else:
         return "."
 
 def format8bytes( b : bytes ) -> str:
+    """
+    Formats 8 bytes into a string of hex digits
+    """
     return b.hex(sep=' ').upper().ljust(24)
 
 
 def determineSerialByteSize( bs: str )-> 'serial.ByteSize':
-    ByteSizes = { "5": serial.FIVEBITS, "6": serial.SIXBITS, "7": serial.SEVENBITS, "8": serial.EIGHTBITS }
+    """
+    Converts command line bits per byte are to a serial BITS configuration
+    """
+    ByteSizes = {
+        "5": serial.FIVEBITS,
+        "6": serial.SIXBITS,
+        "7": serial.SEVENBITS,
+        "8": serial.EIGHTBITS
+    }
     return ByteSizes.get(bs, serial.EIGHTBITS)
 
 def determineSerialParity( p: str ) -> 'serial.Parity':
-    Parities = { "N":serial.PARITY_NONE, "E":serial.PARITY_EVEN, "O":serial.PARITY_ODD, "M":serial.PARITY_MARK, "S":serial.PARITY_SPACE }
+    """
+    Converts command line serial parity bit type to a serial BITS configuration
+    """
+    Parities = {
+        "N":serial.PARITY_NONE,
+        "E":serial.PARITY_EVEN,
+        "O":serial.PARITY_ODD,
+        "M":serial.PARITY_MARK,
+        "S":serial.PARITY_SPACE
+    }
     return Parities.get(p, serial.PARITY_NONE)
 
 def determineSerialStopBits( sb: str ) -> 'serial.StopBits':
-    StopBits = { "1":serial.STOPBITS_ONE, "1.5":serial.STOPBITS_ONE_POINT_FIVE, "2":serial.STOPBITS_TWO }
+    """
+    Converts command line number of stop bits to a serial BITS configuration
+    """
+    StopBits = {
+        "1":serial.STOPBITS_ONE,
+        "1.5":serial.STOPBITS_ONE_POINT_FIVE,
+        "2":serial.STOPBITS_TWO
+    }
     return StopBits.get(sb, serial.STOPBITS_ONE)
 
 def parseSerialFraming( settings: str) -> ['serial.ByteSize', 'serial.Parity', 'serial.StopBits']:
     match = re.fullmatch(r"^([5-8]?)([EMNOS]?)((1\.5)|2|1?)$", settings.strip().upper())
     if match is None:
         raise Exception( "Framing settings parse error in '{}'.".format( settings ) )
-    print (match.group(0,1,2,3))
-    return determineSerialByteSize(match.group(1)), determineSerialParity(match.group(2)), determineSerialStopBits(match.group(3))
+    bs = determineSerialByteSize(match.group(1))
+    p = determineSerialParity(match.group(2))
+    sb = determineSerialStopBits(match.group(3))
+    return bs, p, sb
 
 
 def parseSerialFlowControl( flowControl: str ) -> [bool('xonxoff'), bool('rtscts'), bool('dsrdtr')]:
@@ -72,23 +101,31 @@ class HexTerm:
     def __init__(self, args: 'argparse.Namespace'):
         self.args = args
         self.shutdown = threading.Event()
+        self.output = None
+        self.outputFlush = None
+        self.readline = None
+        self.readByte = None
+        self.writeByte = None
 
     def ConvertBytes2String(self, mybytes: bytes) -> str:
-        return format8bytes(mybytes[0:8]) + " " + format8bytes(mybytes[8:16]) + " |" +"".join(map( makeprintable, mybytes.decode(encoding=self.args.encoding,errors='replace'))).ljust(16)+"|"
+        decoded_bytes = mybytes.decode(encoding=self.args.encoding,errors='replace')
+        return_val  = format8bytes(mybytes[0:8]) + " " + format8bytes(mybytes[8:16]) + " |"
+        return_val += "".join(map( makeprintable, decoded_bytes)).ljust(16)+"|"
+        return return_val
 
     def parseBytes(self, s: str ) -> bytes:
-        if (not isinstance(s, str)):
+        if not isinstance(s, str):
             return b""
         s = s.lstrip()
-        if (s == ""):
+        if s == "":
             return b""
 
-        if (s[0] in "0123456789abcdefABCDEF"):
+        if s[0] in "0123456789abcdefABCDEF":
             return bytes.fromhex(s[0:2]) + self.parseBytes(s[2:])
-        elif ("'"==s[0]):
+        elif "'"==s[0]:
             l = s.split(sep="'", maxsplit=3) + [""]
             return l[1].encode(encoding=self.args.encoding) + self.parseBytes(l[2])
-        elif ('"'==s[0]):
+        elif '"'==s[0]:
             l = s.split(sep='"', maxsplit=3) + [""]
             return l[1].encode(encoding=self.args.encoding) + self.parseBytes(l[2])
         else:
@@ -152,20 +189,20 @@ class HexTerm:
             self.output = sys.stdout.write
             self.outputFlush = sys.stdout.flush
             return self.mainloop()
-        else:
-            with open(self.args.output, "a+") as outfile:
-                self.output = outfile.write
-                self.outputFlush = outfile.flush
-                return self.mainloop()
+        # else
+        with open(self.args.output, "a+") as outfile:
+            self.output = outfile.write
+            self.outputFlush = outfile.flush
+            return self.mainloop()
 
     def createInput(self) -> int:
         if self.args.input == "-":
             self.readline = sys.stdin.readline
             return self.createOutput()
-        else:
-            with open(self.args.input, "r") as infile:
-                self.readline = infile.readline
-                return self.createOutput()
+        # else
+        with open(self.args.input, "r") as infile:
+            self.readline = infile.readline
+            return self.createOutput()
 
 
     def run(self) -> int:
@@ -177,7 +214,10 @@ class HexTerm:
 
         bytesize, parity, stopbits = parseSerialFraming(self.args.framing)
         xonxoff, rtscts, dsrdtr = parseSerialFlowControl(self.args.flow_control)
-        with serial.Serial(port=self.args.portname, baudrate=self.args.baud, bytesize=bytesize, parity=parity, stopbits=stopbits, xonxoff=xonxoff, rtscts=rtscts, dsrdtr=dsrdtr, timeout=320/self.args.baud) as port:
+
+        with serial.Serial(port=self.args.portname, baudrate=self.args.baud, bytesize=bytesize,
+        parity=parity, stopbits=stopbits, xonxoff=xonxoff, rtscts=rtscts, dsrdtr=dsrdtr,
+        timeout=320/self.args.baud) as port:
             self.readByte=lambda : port.read(16)
             self.writeByte=lambda b : port.write(b); port.flush()
             return self.createInput()
@@ -187,20 +227,32 @@ class HexTerm:
 
 
 def main() -> int:
-    global LICENSE
-    global DESCRIPTION
     parser = argparse.ArgumentParser(
                     formatter_class=argparse.RawDescriptionHelpFormatter,
                     description = DESCRIPTION,
                     epilog = LICENSE)
 
-    parser.add_argument('portname',                            metavar='PORT',                                 help='uses named PORT')
-    parser.add_argument('-b','--baud','--speed',               metavar='BAUDRATE',  type=int, default=9600,    help='sets the ports BUADRATE, default 9600')
-    parser.add_argument('-c','--flow-control','--control',     metavar='METHOD',              default="None",  help='sets flow control METHOD [HW:(RTS/CTS), SW:(XON/XOFF), None:(default)]')
-    parser.add_argument('-e','--encoding',                     metavar='CODEC',               default="cp437", help='sets encoding CODEC(ascii, latin-1, utf-8, etc), default cp437')
-    parser.add_argument('-f','--framing',                      metavar='8N1',                 default="8N1",   help='sets framing parameters in <DATABITS[5-8]> <PARITY[EMNOS]> <STOPBITS[1,1.5,2]> form, default 8N1')
-    parser.add_argument('-i','--input',                        metavar='FILENAME',            default="-",     help='input is read from FILENAME')
-    parser.add_argument('-o','--output',                       metavar='FILENAME',            default="-",     help='output is appended to FILENAME')
+    parser.add_argument('portname',
+        metavar='PORT',
+        help='uses named PORT')
+    parser.add_argument('-b','--baud','--speed',
+        metavar='BAUDRATE',  type=int, default=9600,
+        help='sets the ports BUADRATE, default 9600')
+    parser.add_argument('-c','--flow-control','--control',
+        metavar='METHOD',              default="None",
+        help='sets flow control METHOD [HW:(RTS/CTS), SW:(XON/XOFF), None:(default)]')
+    parser.add_argument('-e','--encoding',
+        metavar='CODEC',               default="cp437",
+        help='sets encoding CODEC(ascii, latin-1, utf-8, etc), default cp437')
+    parser.add_argument('-f','--framing',
+        metavar='8N1',                 default="8N1",
+        help='sets framing in <DATABITS[5-8]><PARITY[EMNOS]><STOPBITS[1,1.5,2]> form, default 8N1')
+    parser.add_argument('-i','--input',
+        metavar='FILENAME',            default="-",
+        help='input is read from FILENAME')
+    parser.add_argument('-o','--output',
+        metavar='FILENAME',            default="-",
+        help='output is appended to FILENAME')
 
     args = parser.parse_args()
 
