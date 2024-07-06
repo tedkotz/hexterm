@@ -273,8 +273,15 @@ class HexTerm:
         with serial.Serial(port=self.args.portname, baudrate=self.args.baud, bytesize=bytesize,
         parity=parity, stopbits=stopbits, xonxoff=xonxoff, rtscts=rtscts, dsrdtr=dsrdtr,
         timeout=320/self.args.baud) as port:
-            self.read_byte=lambda : port.read(16)
-            self.write_byte=lambda b : port.write(b); port.flush()
+            def read_port():
+                return port.read(16)
+            self.read_byte=read_port
+
+            def write_port( mybytes ):
+                port.write(mybytes)
+                port.flush()
+            self.write_byte=write_port
+
             return self.create_local_input_stream()
 
         self.shutdown.set()
