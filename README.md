@@ -31,7 +31,7 @@ optional arguments:
 ## Dependencies
 - python3
 - pyserial
-- Maybe readline
+- Maybe prompt_toolkit
 
 ## ToDo
 - [x] Input thread
@@ -41,10 +41,14 @@ optional arguments:
 - [x] File I/O support
 - [x] Mixed hex and string input
 - [x] Use serial parameters
-- [ ] Add doc strings to all functions
+- [x] Add doc strings to all functions
 - [ ] Add `help` command
 - [ ] Add `--encoding help`
 - [ ] Add `--flow-control help`
 - [ ] Add `--framing help`
 - [ ] Standardize CLI options and descriptions a little (dd, gcc, cu, minicom)
 - [ ] Add I/O processing delay in script modes
+- [ ] Consider using async instead of threads
+- [ ] handle single digit bytes when white space separated
+- [ ] Add monitor port for serial protocol analyzer type mitm mode
+- [ ] Add requirements.txt file

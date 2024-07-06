@@ -1,4 +1,29 @@
 #!/usr/bin/env python3
+'''
+Raw hexadecimal based terminal emulator for monitoring binary serial interfaces
+
+Copyright (c) 2023 Theodore Kotz <ted@kotz.us>
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+'''
+
+import argparse
+import re
+import sys
+import threading
+import time
+
+import serial
+
 LICENSE = '''\
 Copyright (c) 2023 Theodore Kotz <ted@kotz.us>
 
@@ -15,130 +40,145 @@ PERFORMANCE OF THIS SOFTWARE.'''
 
 DESCRIPTION = "Raw hexadecimal based terminal emulator for monitoring binary serial interfaces"
 
-import argparse
-import re
-import sys
-import threading
-import time
+def make_printable( txt : str, subst: str ="." ) -> str:
+    """
+    Returns `txt` with all the non printable characters replaced with `subst`,
+    if not specified `subst` is "."
+    """
+    return "".join([ char if char.isprintable() else subst for char in txt])
 
-import serial
-
-def makeprintable( s: str ) -> str:
-    if s.isprintable():
-        return s
-    else:
-        return "."
-
-def format8bytes( b : bytes ) -> str:
+def format8bytes( arr : bytes ) -> str:
     """
     Formats 8 bytes into a string of hex digits
     """
-    return b.hex(sep=' ').upper().ljust(24)
+    return arr.hex(sep=' ').upper().ljust(24)
 
 
-def determineSerialByteSize( bs: str )-> 'serial.ByteSize':
+BYTESIZES = {
+    "5": serial.FIVEBITS,
+    "6": serial.SIXBITS,
+    "7": serial.SEVENBITS,
+    "8": serial.EIGHTBITS
+}
+def determine_serial_byte_size( arg : str )-> 'serial.ByteSize':
     """
     Converts command line bits per byte are to a serial BITS configuration
     """
-    ByteSizes = {
-        "5": serial.FIVEBITS,
-        "6": serial.SIXBITS,
-        "7": serial.SEVENBITS,
-        "8": serial.EIGHTBITS
-    }
-    return ByteSizes.get(bs, serial.EIGHTBITS)
+    return BYTESIZES.get(arg, serial.EIGHTBITS)
 
-def determineSerialParity( p: str ) -> 'serial.Parity':
+PARITIES = {
+    "N":serial.PARITY_NONE,
+    "E":serial.PARITY_EVEN,
+    "O":serial.PARITY_ODD,
+    "M":serial.PARITY_MARK,
+    "S":serial.PARITY_SPACE
+}
+def determine_serial_parity( arg: str ) -> 'serial.Parity':
     """
-    Converts command line serial parity bit type to a serial BITS configuration
+    Converts command line serial parity bit type to a serial Parity configuration
     """
-    Parities = {
-        "N":serial.PARITY_NONE,
-        "E":serial.PARITY_EVEN,
-        "O":serial.PARITY_ODD,
-        "M":serial.PARITY_MARK,
-        "S":serial.PARITY_SPACE
-    }
-    return Parities.get(p, serial.PARITY_NONE)
+    return PARITIES.get(arg, serial.PARITY_NONE)
 
-def determineSerialStopBits( sb: str ) -> 'serial.StopBits':
+STOPBITS = {
+    "1":serial.STOPBITS_ONE,
+    "1.5":serial.STOPBITS_ONE_POINT_FIVE,
+    "2":serial.STOPBITS_TWO
+}
+def determine_serial_stop_bits( arg: str ) -> 'serial.StopBits':
     """
-    Converts command line number of stop bits to a serial BITS configuration
+    Converts command line number of stop bits to a serial Stop Bits configuration
     """
-    StopBits = {
-        "1":serial.STOPBITS_ONE,
-        "1.5":serial.STOPBITS_ONE_POINT_FIVE,
-        "2":serial.STOPBITS_TWO
-    }
-    return StopBits.get(sb, serial.STOPBITS_ONE)
+    return STOPBITS.get(arg, serial.STOPBITS_ONE)
 
-def parseSerialFraming( settings: str) -> ['serial.ByteSize', 'serial.Parity', 'serial.StopBits']:
+def parse_serial_framing( settings: str
+    ) -> ['serial.ByteSize', 'serial.Parity', 'serial.StopBits']:
+    """
+    Converts "8N1" format serial framing description into serial configuration
+    parameters
+    """
     match = re.fullmatch(r"^([5-8]?)([EMNOS]?)((1\.5)|2|1?)$", settings.strip().upper())
     if match is None:
-        raise Exception( "Framing settings parse error in '{}'.".format( settings ) )
-    bs = determineSerialByteSize(match.group(1))
-    p = determineSerialParity(match.group(2))
-    sb = determineSerialStopBits(match.group(3))
-    return bs, p, sb
+        raise ValueError( f"framing settings parse error in '{settings}'" )
+    byte_size = determine_serial_byte_size(match.group(1))
+    parity = determine_serial_parity(match.group(2))
+    stop_bits = determine_serial_stop_bits(match.group(3))
+    return byte_size, parity, stop_bits
 
 
-def parseSerialFlowControl( flowControl: str ) -> [bool('xonxoff'), bool('rtscts'), bool('dsrdtr')]:
-    s = flowControl.upper()
-    if s == "NONE":
-        return False, False, False
-    elif s == "SW":
-        return True, False, False
-    elif s == "HW" or s == "RTS":
-        return False, True, False
-    elif s == "DSR":
-        return False, False, True
-    elif s == "ALL":
-        return True, True, True
-    raise Exception( "Flow Control settings parse error in '{}'.".format( flowControl ) )
+
+FLOWCONTROLSETTINGS = {
+    "NONE":  ( False, False, False ),
+    "SW":    ( True,  False, False ),
+    "HW":    ( False, True,  False ),
+    "RTS":   ( False, True,  False ),
+    "DSR":   ( False, False, True  ),
+    "ALL":   ( True,  True,  True  ),
+}
+def parse_serial_flow_control( arg: str
+    ) -> [bool('xonxoff'), bool('rtscts'), bool('dsrdtr')]:
+    """
+    Converts Flow control specification description into serial configuration
+    parameters
+    """
+    flow_control = FLOWCONTROLSETTINGS.get(arg.upper())
+    if flow_control is None:
+        raise ValueError( f"flow control settings parse error in '{arg}'" )
+    return flow_control[0], flow_control[1], flow_control[2]
 
 class HexTerm:
+    """
+    Hexterminal main threads and routing.
+    """
 
     def __init__(self, args: 'argparse.Namespace'):
         self.args = args
         self.shutdown = threading.Event()
         self.output = None
-        self.outputFlush = None
+        self.output_flush = None
         self.readline = None
-        self.readByte = None
-        self.writeByte = None
+        self.read_byte = None
+        self.write_byte = None
 
-    def ConvertBytes2String(self, mybytes: bytes) -> str:
+    def convert_16bytes_to_string(self, mybytes: bytes) -> str:
+        """
+        Converts 16 bytes to a printable line of text
+        """
         decoded_bytes = mybytes.decode(encoding=self.args.encoding,errors='replace')
         return_val  = format8bytes(mybytes[0:8]) + " " + format8bytes(mybytes[8:16]) + " |"
-        return_val += "".join(map( makeprintable, decoded_bytes)).ljust(16)+"|"
+        return_val += make_printable(decoded_bytes).ljust(16)+"|"
         return return_val
 
-    def parseBytes(self, s: str ) -> bytes:
-        if not isinstance(s, str):
+    def _extract_bytes(self, txt: str ) -> bytes:
+        if not isinstance(txt, str):
             return b""
-        s = s.lstrip()
-        if s == "":
+        txt = txt.lstrip()
+        if txt == "":
             return b""
 
-        if s[0] in "0123456789abcdefABCDEF":
-            return bytes.fromhex(s[0:2]) + self.parseBytes(s[2:])
-        elif "'"==s[0]:
-            l = s.split(sep="'", maxsplit=3) + [""]
-            return l[1].encode(encoding=self.args.encoding) + self.parseBytes(l[2])
-        elif '"'==s[0]:
-            l = s.split(sep='"', maxsplit=3) + [""]
-            return l[1].encode(encoding=self.args.encoding) + self.parseBytes(l[2])
-        else:
-            raise Exception("Syntax Error")
+        if txt[0] in "0123456789abcdefABCDEF":
+            return bytes.fromhex(txt[0:2]) + self._extract_bytes(txt[2:])
+        if "'"==txt[0]:
+            mylist = txt.split(sep="'", maxsplit=3) + [""]
+            return mylist[1].encode(encoding=self.args.encoding) + self._extract_bytes(mylist[2])
+        if '"'==txt[0]:
+            mylist = txt.split(sep='"', maxsplit=3) + [""]
+            return mylist[1].encode(encoding=self.args.encoding) + self._extract_bytes(mylist[2])
+        raise SyntaxError("Syntax Error")
 
-    def ConvertString2Bytes(self, mystring: str) -> bytes:
+    def convert_string_to_bytes(self, txt: str) -> bytes:
+        """
+        Convert user input string to raw bytes for sending over the wire
+        """
         try:
-            return self.parseBytes(mystring)
-        except Exception as e:
-            print (e)
+            return self._extract_bytes(txt)
+        except Exception as exception:
+            print (exception)
         return b""
 
-    def Char2BytesLoop(self):
+    def local_input_loop(self):
+        """
+        Processing loop for the data coming in locally
+        """
         while not self.shutdown.is_set():
             #time.sleep(1)
             line = self.readline()
@@ -146,29 +186,35 @@ class HexTerm:
             if line == "" or line[0].upper() == "Q":
                 self.shutdown.set()
             else:
-                self.writeByte(self.ConvertString2Bytes(line))
+                self.write_byte(self.convert_string_to_bytes(line))
 
-    def Bytes2CharLoop(self):
+    def serial_input_loop(self):
+        """
+        Processing loop for the data coming in the serial port
+        """
         timestamp = time.time()
         data = bytearray()
         while not self.shutdown.is_set():
             #time.sleep(1)
-            newByte = self.readByte()
-            currTime = time.time()
-            if (newByte is None) or (newByte == b""):
+            new_byte = self.read_byte()
+            curr_time = time.time()
+            if (new_byte is None) or (new_byte == b""):
                 pass
             else:
                 if len(data) == 0:
-                    timestamp = currTime
-                data = data + newByte
-            if (len(data) > 16) or ((len(data) > 0) and (currTime - timestamp) > 1):
-                self.output("  "+self.ConvertBytes2String(data[0:16])+"\n")
+                    timestamp = curr_time
+                data = data + new_byte
+            if (len(data) > 16) or ((len(data) > 0) and (curr_time - timestamp) > 1):
+                self.output("  "+self.convert_16bytes_to_string(data[0:16])+"\n")
                 data = data[16:]
-                timestamp = currTime
+                timestamp = curr_time
 
     def mainloop(self) -> int:
-        b2c = threading.Thread(target=self.Bytes2CharLoop)
-        c2b = threading.Thread(target=self.Char2BytesLoop)
+        """
+        Main processing control loop
+        """
+        b2c = threading.Thread(target=self.serial_input_loop)
+        c2b = threading.Thread(target=self.local_input_loop)
 
         # Start both loops.
         b2c.start()
@@ -184,49 +230,61 @@ class HexTerm:
         return 0
 
 
-    def createOutput(self) -> int:
+    def create_local_output_stream(self) -> int:
+        """
+        Parses the output settings and then passes control
+        """
         if self.args.output == "-":
             self.output = sys.stdout.write
-            self.outputFlush = sys.stdout.flush
+            self.output_flush = sys.stdout.flush
             return self.mainloop()
         # else
-        with open(self.args.output, "a+") as outfile:
+        with open(self.args.output, "a+", encoding="utf-8") as outfile:
             self.output = outfile.write
-            self.outputFlush = outfile.flush
+            self.output_flush = outfile.flush
             return self.mainloop()
 
-    def createInput(self) -> int:
+    def create_local_input_stream(self) -> int:
+        """
+        Parses the input settings and then passes control
+        """
         if self.args.input == "-":
             self.readline = sys.stdin.readline
-            return self.createOutput()
+            return self.create_local_output_stream()
         # else
-        with open(self.args.input, "r") as infile:
+        with open(self.args.input, "r", encoding="utf-8") as infile:
             self.readline = infile.readline
-            return self.createOutput()
+            return self.create_local_output_stream()
 
 
     def run(self) -> int:
+        """
+        Entry point for passing control to the Hexterm
+        """
         self.shutdown.clear()
         print(str(self.args).replace("Namespace","Settings",1))
         print("Type 'quit' to exit")
 
         # create Serial Device
 
-        bytesize, parity, stopbits = parseSerialFraming(self.args.framing)
-        xonxoff, rtscts, dsrdtr = parseSerialFlowControl(self.args.flow_control)
+        bytesize, parity, stopbits = parse_serial_framing(self.args.framing)
+        xonxoff, rtscts, dsrdtr = parse_serial_flow_control(self.args.flow_control)
 
         with serial.Serial(port=self.args.portname, baudrate=self.args.baud, bytesize=bytesize,
         parity=parity, stopbits=stopbits, xonxoff=xonxoff, rtscts=rtscts, dsrdtr=dsrdtr,
         timeout=320/self.args.baud) as port:
-            self.readByte=lambda : port.read(16)
-            self.writeByte=lambda b : port.write(b); port.flush()
-            return self.createInput()
+            self.read_byte=lambda : port.read(16)
+            self.write_byte=lambda b : port.write(b); port.flush()
+            return self.create_local_input_stream()
 
         self.shutdown.set()
         return -1
 
 
 def main() -> int:
+    """
+    Global main for hexterm
+    """
     parser = argparse.ArgumentParser(
                     formatter_class=argparse.RawDescriptionHelpFormatter,
                     description = DESCRIPTION,
