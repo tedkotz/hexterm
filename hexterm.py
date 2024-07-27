@@ -133,17 +133,19 @@ class HexTerm:
     def __init__(self, args: 'argparse.Namespace'):
         self.args = args
         self.shutdown = threading.Event()
-        self.output = None
-        self.output_flush = None
-        self.readline = None
-        self.read_byte = None
-        self.write_byte = None
+        self.local_write = None
+        self.local_flush = None
+        self.local_readline = None
+        self.dce_read = None
+        self.dce_write = None
+        #self._dte_read = None
+        #self._dte_write = None
 
     def convert_16bytes_to_string(self, mybytes: bytes) -> str:
         """
         Converts 16 bytes to a printable line of text
         """
-        decoded_bytes = mybytes.decode(encoding=self.args.encoding,errors='replace')
+        decoded_bytes = mybytes.decode(encoding=self.args.encoding, errors='replace')
         return_val  = format8bytes(mybytes[0:8]) + " " + format8bytes(mybytes[8:16]) + " |"
         return_val += make_printable(decoded_bytes).ljust(16)+"|"
         return return_val
@@ -183,14 +185,14 @@ class HexTerm:
         """
         while not self.shutdown.is_set():
             #time.sleep(1)
-            line = self.readline()
+            line = self.local_readline()
             # EOF or quit
             if line == "" or line[0].upper() == "Q":
                 self.shutdown.set()
             else:
-                self.write_byte(self.convert_string_to_bytes(line))
+                self.dce_write(self.convert_string_to_bytes(line))
 
-    def serial_input_loop(self):
+    def dce_input_loop(self):
         """
         Processing loop for the data coming in the serial port
         """
@@ -198,7 +200,7 @@ class HexTerm:
         data = bytearray()
         while not self.shutdown.is_set():
             #time.sleep(1)
-            new_byte = self.read_byte()
+            new_byte = self.dce_read()
             curr_time = time.time()
             if (new_byte is None) or (new_byte == b""):
                 pass
@@ -207,7 +209,7 @@ class HexTerm:
                     timestamp = curr_time
                 data = data + new_byte
             if (len(data) > 16) or ((len(data) > 0) and (curr_time - timestamp) > 1):
-                self.output("  "+self.convert_16bytes_to_string(data[0:16])+"\n")
+                self.local_write("  "+self.convert_16bytes_to_string(data[0:16])+"\n")
                 data = data[16:]
                 timestamp = curr_time
 
@@ -215,17 +217,17 @@ class HexTerm:
         """
         Main processing control loop
         """
-        b2c = threading.Thread(target=self.serial_input_loop)
-        c2b = threading.Thread(target=self.local_input_loop)
+        dce_rx_thread = threading.Thread(target=self.dce_input_loop)
+        local_rx_thread = threading.Thread(target=self.local_input_loop)
 
         # Start both loops.
-        b2c.start()
-        c2b.start()
+        dce_rx_thread.start()
+        local_rx_thread.start()
 
         # wait for join.
-        b2c.join()
+        dce_rx_thread.join()
         self.shutdown.set()
-        c2b.join()
+        local_rx_thread.join()
         self.shutdown.set()
 
         print("Exiting")
@@ -237,13 +239,13 @@ class HexTerm:
         Parses the output settings and then passes control
         """
         if self.args.output == "-":
-            self.output = sys.stdout.write
-            self.output_flush = sys.stdout.flush
+            self.local_write = sys.stdout.write
+            self.local_flush = sys.stdout.flush
             return self.mainloop()
         # else
         with open(self.args.output, "a+", encoding="utf-8") as outfile:
-            self.output = outfile.write
-            self.output_flush = outfile.flush
+            self.local_write = outfile.write
+            self.local_flush = outfile.flush
             return self.mainloop()
 
     def create_local_input_stream(self) -> int:
@@ -251,11 +253,11 @@ class HexTerm:
         Parses the input settings and then passes control
         """
         if self.args.input == "-":
-            self.readline = sys.stdin.readline
+            self.local_readline = sys.stdin.readline
             return self.create_local_output_stream()
         # else
         with open(self.args.input, "r", encoding="utf-8") as infile:
-            self.readline = infile.readline
+            self.local_readline = infile.readline
             return self.create_local_output_stream()
 
 
@@ -274,15 +276,15 @@ class HexTerm:
 
         with serial.Serial(port=self.args.portname, baudrate=self.args.baud, bytesize=bytesize,
         parity=parity, stopbits=stopbits, xonxoff=xonxoff, rtscts=rtscts, dsrdtr=dsrdtr,
-        timeout=320/self.args.baud) as port:
+        timeout=320/self.args.baud) as dce:
             def read_port():
-                return port.read(16)
-            self.read_byte=read_port
+                return dce.read(16)
+            self.dce_read=read_port
 
             def write_port( mybytes ):
-                port.write(mybytes)
-                port.flush()
-            self.write_byte=write_port
+                dce.write(mybytes)
+                dce.flush()
+            self.dce_write=write_port
 
             return self.create_local_input_stream()
 
@@ -320,6 +322,9 @@ def main() -> int:
     parser.add_argument('-o','--output',
         metavar='FILENAME',            default="-",
         help='output is appended to FILENAME')
+    parser.add_argument('-m','--mitm', '--monitor',
+        metavar='PORT',
+        help='Act as a protocol analyzer sitting between the DCE/DTE ports.')
 
     args = parser.parse_args()
 
@@ -330,3 +335,14 @@ def main() -> int:
 
 if __name__ == '__main__':
     sys.exit(main())
+
+
+#
+#
+#  io ports:
+#   port - dce
+#   mitm - dte
+#   local
+#
+#  1 thread for each input
+#  1 mutex for each output
