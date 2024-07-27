@@ -197,7 +197,7 @@ class HexTerm:
             else:
                 self.dce_write(self.convert_string_to_bytes(line))
 
-    def serial_input_loop(self, serial_read):
+    def serial_input_loop(self, serial_read, prefix=""):
         """
         Processing loop for the data coming in the serial port
         """
@@ -215,7 +215,7 @@ class HexTerm:
                         timestamp = curr_time
                     data = data + new_byte
                 if (len(data) > 16) or ((len(data) > 0) and (curr_time - timestamp) > 1):
-                    self.local_write("  "+self.convert_16bytes_to_string(data[0:16])+"\n")
+                    self.local_write(f"{prefix}  {self.convert_16bytes_to_string(data[0:16])}\n")
                     data = data[16:]
                     timestamp = curr_time
 
@@ -223,14 +223,17 @@ class HexTerm:
         """
         Processing loop for the data coming in the DCE serial port
         """
-        self.serial_input_loop( self.dce_read )
+        if self.args.mitm is not None:
+            self.serial_input_loop( self.dce_read, "T<<C" )
+        else:
+            self.serial_input_loop( self.dce_read )
         print("Exiting DCE.")
 
     def dte_input_loop(self):
         """
         Processing loop for the data coming in the DCE serial port
         """
-        self.serial_input_loop( self.dte_read )
+        self.serial_input_loop( self.dte_read, "T>>C" )
         print("Exiting DTE.")
 
 
