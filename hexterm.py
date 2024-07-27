@@ -138,8 +138,8 @@ class HexTerm:
         self.local_readline = None
         self.dce_read = None
         self.dce_write = None
-        #self._dte_read = None
-        #self._dte_write = None
+        self.dte_read = None
+        self.dte_write = None
 
     def convert_16bytes_to_string(self, mybytes: bytes) -> str:
         """
@@ -189,38 +189,60 @@ class HexTerm:
             # EOF or quit
             if line == "" or line[0].upper() == "Q":
                 self.shutdown.set()
+            elif line[0].upper() == "T":
+                if self.dte_write is None:
+                    print("DTE not supported.")
+                else:
+                    self.dte_write(self.convert_string_to_bytes(line[1:]))
             else:
                 self.dce_write(self.convert_string_to_bytes(line))
 
-    def dce_input_loop(self):
+    def serial_input_loop(self, serial_read):
         """
         Processing loop for the data coming in the serial port
         """
-        timestamp = time.time()
-        data = bytearray()
-        while not self.shutdown.is_set():
-            #time.sleep(1)
-            new_byte = self.dce_read()
-            curr_time = time.time()
-            if (new_byte is None) or (new_byte == b""):
-                pass
-            else:
-                if len(data) == 0:
+        if serial_read is not None:
+            timestamp = time.time()
+            data = bytearray()
+            while not self.shutdown.is_set():
+                #time.sleep(1)
+                new_byte = serial_read()
+                curr_time = time.time()
+                if (new_byte is None) or (new_byte == b""):
+                    pass
+                else:
+                    if len(data) == 0:
+                        timestamp = curr_time
+                    data = data + new_byte
+                if (len(data) > 16) or ((len(data) > 0) and (curr_time - timestamp) > 1):
+                    self.local_write("  "+self.convert_16bytes_to_string(data[0:16])+"\n")
+                    data = data[16:]
                     timestamp = curr_time
-                data = data + new_byte
-            if (len(data) > 16) or ((len(data) > 0) and (curr_time - timestamp) > 1):
-                self.local_write("  "+self.convert_16bytes_to_string(data[0:16])+"\n")
-                data = data[16:]
-                timestamp = curr_time
+
+    def dce_input_loop(self):
+        """
+        Processing loop for the data coming in the DCE serial port
+        """
+        self.serial_input_loop( self.dce_read )
+        print("Exiting DCE.")
+
+    def dte_input_loop(self):
+        """
+        Processing loop for the data coming in the DCE serial port
+        """
+        self.serial_input_loop( self.dte_read )
+        print("Exiting DTE.")
+
 
     def mainloop(self) -> int:
         """
         Main processing control loop
         """
+        dte_rx_thread = threading.Thread(target=self.dte_input_loop)
         dce_rx_thread = threading.Thread(target=self.dce_input_loop)
-        #dte_rx_thread = threading.Thread(target=self.dte_input_loop)
 
         # Start support threads
+        dte_rx_thread.start()
         dce_rx_thread.start()
 
         # Start Local RX Thread
@@ -229,6 +251,7 @@ class HexTerm:
         print("Exiting.")
 
         # wait for join.
+        dte_rx_thread.join()
         dce_rx_thread.join()
 
         return 0
