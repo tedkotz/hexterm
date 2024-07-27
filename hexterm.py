@@ -163,7 +163,7 @@ class HexTerm:
         if '"'==txt[0]:
             mylist = txt.split(sep='"', maxsplit=3) + [""]
             return mylist[1].encode(encoding=self.args.encoding) + self._extract_bytes(mylist[2])
-        raise SyntaxError("Syntax Error")
+        raise ValueError("does not match hexterm command")
 
     def convert_string_to_bytes(self, txt: str) -> bytes:
         """
@@ -171,8 +171,10 @@ class HexTerm:
         """
         try:
             return self._extract_bytes(txt)
-        except Exception as exception:
-            print (exception)
+        except UnicodeEncodeError as exception: # encode()
+            print (f"UnicodeEncodeError({exception}) in '{txt}'")
+        except ValueError as exception: # fromhex() and fall-through _extract_bytes case
+            print (f"ValueError({exception}) in '{txt}'")
         return b""
 
     def local_input_loop(self):
