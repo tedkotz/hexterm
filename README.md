@@ -48,7 +48,7 @@ optional arguments:
 - [ ] Add `--framing help`
 - [ ] Standardize CLI options and descriptions a little (dd, gcc, cu, minicom)
 - [ ] Add I/O processing delay in script modes
-- [ ] Consider using async instead of threads
+- [ ] Consider using asyncio instead of threads
 - [ ] handle single digit bytes when white space separated
 - [ ] Add monitor port for serial protocol analyzer type mitm mode
 - [ ] Add requirements.txt file

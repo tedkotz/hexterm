@@ -218,19 +218,19 @@ class HexTerm:
         Main processing control loop
         """
         dce_rx_thread = threading.Thread(target=self.dce_input_loop)
-        local_rx_thread = threading.Thread(target=self.local_input_loop)
+        #dte_rx_thread = threading.Thread(target=self.dte_input_loop)
 
-        # Start both loops.
+        # Start support threads
         dce_rx_thread.start()
-        local_rx_thread.start()
+
+        # Start Local RX Thread
+        self.local_input_loop()
+        self.shutdown.set()
+        print("Exiting.")
 
         # wait for join.
         dce_rx_thread.join()
-        self.shutdown.set()
-        local_rx_thread.join()
-        self.shutdown.set()
 
-        print("Exiting")
         return 0
 
 
@@ -344,5 +344,9 @@ if __name__ == '__main__':
 #   mitm - dte
 #   local
 #
-#  1 thread for each input
+#  Threads:
+#    local_rx_thread - initial main thread, takes "user" input, parses CLI
+#    dce_rx_thread - takes bytes from DCE, converts to Human readable form
+#    <TBD> dte_rx_thread - takes bytes from DTE in mitm mode, converts to Human readable form
+#    <TBD> output_worker_thread - background thread to take over conversion to Human readable form
 #  1 mutex for each output
