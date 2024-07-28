@@ -40,19 +40,7 @@ PERFORMANCE OF THIS SOFTWARE.'''
 
 DESCRIPTION = "Raw hexadecimal based terminal emulator for monitoring binary serial interfaces"
 
-def make_printable( txt : str, subst: str ="." ) -> str:
-    """
-    Returns `txt` with all the non printable characters replaced with `subst`,
-    if not specified `subst` is "."
-    """
-    return "".join([ char if char.isprintable() else subst for char in txt])
-
-def format8bytes( arr : bytes ) -> str:
-    """
-    Formats 8 bytes into a string of hex digits
-    """
-    return arr.hex(sep=' ').upper().ljust(24)
-
+## Configuration parsing functions #############################################
 
 BYTESIZES = {
     "5": serial.FIVEBITS,
@@ -104,8 +92,6 @@ def parse_serial_framing( settings: str
     stop_bits = determine_serial_stop_bits(match.group(3))
     return byte_size, parity, stop_bits
 
-
-
 FLOWCONTROLSETTINGS = {
     "NONE":  ( False, False, False ),
     "SW":    ( True,  False, False ),
@@ -125,11 +111,36 @@ def parse_serial_flow_control( arg: str
         raise ValueError( f"flow control settings parse error in '{arg}'" )
     return flow_control[0], flow_control[1], flow_control[2]
 
+
+## Output formatting functions #################################################
+
+def make_printable( txt : str, subst: str ="." ) -> str:
+    """
+    Returns `txt` with all the non printable characters replaced with `subst`,
+    if not specified `subst` is "."
+    """
+    return "".join([ char if char.isprintable() else subst for char in txt])
+
+def format8bytes( arr : bytes ) -> str:
+    """
+    Formats 8 bytes into a string of hex digits
+    """
+    return arr.hex(sep=' ').upper().ljust(24)
+
+def convert_16bytes_to_string(mybytes: bytes, encoding: str) -> str:
+    """
+    Converts 16 bytes to a printable line of text
+    """
+    decoded_bytes = mybytes.decode(encoding=encoding, errors='replace')
+    return_val  = format8bytes(mybytes[0:8]) + " " + format8bytes(mybytes[8:16]) + " |"
+    return_val += make_printable(decoded_bytes).ljust(16)+"|"
+    return return_val
+
+
 class HexTerm:
     """
     Hexterminal main threads and routing.
     """
-
     def __init__(self, args: 'argparse.Namespace'):
         self.args = args
         self.shutdown = threading.Event()
@@ -140,15 +151,6 @@ class HexTerm:
         self.dce_write = None
         self.dte_read = None
         self.dte_write = None
-
-    def convert_16bytes_to_string(self, mybytes: bytes) -> str:
-        """
-        Converts 16 bytes to a printable line of text
-        """
-        decoded_bytes = mybytes.decode(encoding=self.args.encoding, errors='replace')
-        return_val  = format8bytes(mybytes[0:8]) + " " + format8bytes(mybytes[8:16]) + " |"
-        return_val += make_printable(decoded_bytes).ljust(16)+"|"
-        return return_val
 
     def _extract_bytes(self, txt: str ) -> bytes:
         if not isinstance(txt, str):
@@ -225,7 +227,8 @@ class HexTerm:
                         timestamp = curr_time
                     data = data + new_byte
                 if (len(data) > 16) or ((len(data) > 0) and (curr_time - timestamp) > 1):
-                    self.local_write(f"{prefix}  {self.convert_16bytes_to_string(data[0:16])}\n")
+                    txt=convert_16bytes_to_string(data[0:16], self.args.encoding)
+                    self.local_write(f"{prefix}  {txt}\n")
                     data = data[16:]
                     timestamp = curr_time
 
