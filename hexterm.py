@@ -190,9 +190,7 @@ class HexTerm:
     def __init__(self, args: 'argparse.Namespace'):
         self.args = args
         self.shutdown = threading.Event()
-        self.local_write = None
-        self.local_flush = None
-        self.local_readline = None
+        self.local = None
         self.dce = None
         self.dte = None
 
@@ -201,7 +199,7 @@ class HexTerm:
         Processing loop for the data coming in locally
         """
         while not self.shutdown.is_set():
-            line = self.local_readline()
+            line = self.local.read()
             # EOF or quit
             if line == "" or line[0].upper() == "Q":
                 self.shutdown.set()
@@ -244,7 +242,7 @@ class HexTerm:
                     data = data + new_byte
                 if (len(data) > 16) or ((len(data) > 0) and (curr_time - timestamp) > 1):
                     txt=convert_16bytes_to_string(data[0:16], self.args.encoding)
-                    self.local_write(f"{prefix}  {txt}\n")
+                    self.local.write(f"{prefix}  {txt}\n")
                     data = data[16:]
                     timestamp = curr_time
 
@@ -289,18 +287,16 @@ class HexTerm:
         return 0
 
 
-    def create_local_output_stream(self) -> int:
+    def create_local_output_stream(self, readline: typing.Callable) -> int:
         """
         Parses the output settings and then passes control
         """
         if self.args.output == "-":
-            self.local_write = sys.stdout.write
-            self.local_flush = sys.stdout.flush
+            self.local = IO( readline, sys.stdout.write, sys.stdout.flush)
             return self.mainloop()
         # else
         with open(self.args.output, "a+", encoding="utf-8") as outfile:
-            self.local_write = outfile.write
-            self.local_flush = outfile.flush
+            self.local = IO( readline, outfile.write, outfile.flush)
             return self.mainloop()
 
     def create_local_input_stream(self) -> int:
@@ -308,12 +304,10 @@ class HexTerm:
         Parses the input settings and then passes control
         """
         if self.args.input == "-":
-            self.local_readline = sys.stdin.readline
-            return self.create_local_output_stream()
+            return self.create_local_output_stream(sys.stdin.readline)
         # else
         with open(self.args.input, "r", encoding="utf-8") as infile:
-            self.local_readline = infile.readline
-            return self.create_local_output_stream()
+            return self.create_local_output_stream(infile.readline)
 
     def create_serial_ports(self) -> int:
         """
