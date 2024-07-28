@@ -165,7 +165,7 @@ class HexTerm:
         if '"'==txt[0]:
             mylist = txt.split(sep='"', maxsplit=3) + [""]
             return mylist[1].encode(encoding=self.args.encoding) + self._extract_bytes(mylist[2])
-        raise ValueError("does not match hexterm command")
+        raise ValueError("cannot convert message to bytes")
 
     def convert_string_to_bytes(self, txt: str) -> bytes:
         """
@@ -174,9 +174,9 @@ class HexTerm:
         try:
             return self._extract_bytes(txt)
         except UnicodeEncodeError as exception: # encode()
-            print (f"UnicodeEncodeError({exception}) in '{txt}'")
+            print (f"UnicodeEncodeError({exception}) in '{txt.strip()}'")
         except ValueError as exception: # fromhex() and fall-through _extract_bytes case
-            print (f"ValueError({exception}) in '{txt}'")
+            print (f"ValueError({exception}) in '{txt.strip()}'")
         return b""
 
     def local_input_loop(self):
@@ -184,20 +184,29 @@ class HexTerm:
         Processing loop for the data coming in locally
         """
         while not self.shutdown.is_set():
-            #time.sleep(1)
             line = self.local_readline()
             # EOF or quit
             if line == "" or line[0].upper() == "Q":
                 self.shutdown.set()
+            # Help
+            elif line[0].upper() in "H?":
+                print(" help    - Print commands")
+                print(" quit    - Exit program")
+                print(' <HEX>   - Send message of raw hexadecimal bytes')
+                print(' "text"  - Send message of decoded text string as bytes')
+                print(" 'text'  - Send message of decoded text string as bytes")
+                print(" t <msg> - In mitm mode, send msg to the 2nd mitm DTE port")
+            # DTE Send
             elif line[0].upper() == "T":
                 if self.dte_write is None:
-                    print("DTE not supported.")
+                    print("DTE only supported in mitm monitor mode.")
                 else:
                     self.dte_write(self.convert_string_to_bytes(line[1:]))
+            # DCE Send
             else:
                 self.dce_write(self.convert_string_to_bytes(line))
 
-    def serial_input_loop(self, serial_read, prefix=""):
+    def serial_input_loop(self, serial_read, serial_write, prefix=""):
         """
         Processing loop for the data coming in the serial port
         """
@@ -211,6 +220,7 @@ class HexTerm:
                 if (new_byte is None) or (new_byte == b""):
                     pass
                 else:
+                    serial_write(new_byte)
                     if len(data) == 0:
                         timestamp = curr_time
                     data = data + new_byte
@@ -224,16 +234,18 @@ class HexTerm:
         Processing loop for the data coming in the DCE serial port
         """
         if self.args.mitm is not None:
-            self.serial_input_loop( self.dce_read, "T<<C" )
+            self.serial_input_loop( self.dce_read, self.dte_write, "T<--C" )
         else:
-            self.serial_input_loop( self.dce_read )
+            def do_nothing( _ ):
+                pass
+            self.serial_input_loop( self.dce_read, do_nothing )
         print("Exiting DCE.")
 
     def dte_input_loop(self):
         """
         Processing loop for the data coming in the DCE serial port
         """
-        self.serial_input_loop( self.dte_read, "T>>C" )
+        self.serial_input_loop( self.dte_read, self.dce_write, "T-->C" )
         print("Exiting DTE.")
 
 
@@ -286,6 +298,48 @@ class HexTerm:
             self.local_readline = infile.readline
             return self.create_local_output_stream()
 
+    def create_serial_ports(self) -> int:
+        """
+        Create Serial Devices
+        """
+        # Determine Serial Device Settings
+        bytesize, parity, stopbits = parse_serial_framing(self.args.framing)
+        xonxoff, rtscts, dsrdtr = parse_serial_flow_control(self.args.flow_control)
+
+
+        # Create DCE port
+        with serial.Serial(port=self.args.portname, baudrate=self.args.baud, bytesize=bytesize,
+        parity=parity, stopbits=stopbits, xonxoff=xonxoff, rtscts=rtscts, dsrdtr=dsrdtr,
+        timeout=320/self.args.baud) as dce:
+            def read_dce():
+                return dce.read(16)
+            self.dce_read=read_dce
+
+            def write_dce( mybytes ):
+                dce.write(mybytes)
+                dce.flush()
+            self.dce_write=write_dce
+
+            if self.args.mitm is None:
+                return self.create_local_input_stream()
+
+            # else Create DTE port, if needed
+            with serial.Serial(port=self.args.mitm, baudrate=self.args.baud, bytesize=bytesize,
+            parity=parity, stopbits=stopbits, xonxoff=xonxoff, rtscts=rtscts, dsrdtr=dsrdtr,
+            timeout=320/self.args.baud) as dte:
+                def read_dte():
+                    return dte.read(16)
+                self.dte_read=read_dte
+
+                def write_dte( mybytes ):
+                    dte.write(mybytes)
+                    dte.flush()
+                self.dte_write=write_dte
+
+                return self.create_local_input_stream()
+        self.shutdown.set()
+        return -1
+
 
     def run(self) -> int:
         """
@@ -296,26 +350,8 @@ class HexTerm:
         print("Type 'quit' to exit")
 
         # create Serial Device
+        return self.create_serial_ports()
 
-        bytesize, parity, stopbits = parse_serial_framing(self.args.framing)
-        xonxoff, rtscts, dsrdtr = parse_serial_flow_control(self.args.flow_control)
-
-        with serial.Serial(port=self.args.portname, baudrate=self.args.baud, bytesize=bytesize,
-        parity=parity, stopbits=stopbits, xonxoff=xonxoff, rtscts=rtscts, dsrdtr=dsrdtr,
-        timeout=320/self.args.baud) as dce:
-            def read_port():
-                return dce.read(16)
-            self.dce_read=read_port
-
-            def write_port( mybytes ):
-                dce.write(mybytes)
-                dce.flush()
-            self.dce_write=write_port
-
-            return self.create_local_input_stream()
-
-        self.shutdown.set()
-        return -1
 
 
 def main() -> int:
@@ -350,7 +386,7 @@ def main() -> int:
         help='output is appended to FILENAME')
     parser.add_argument('-m','--mitm', '--monitor',
         metavar='PORT',
-        help='Act as a protocol analyzer sitting between the DCE/DTE ports.')
+        help='enables "monitor in the middle" mode, for use as a protocol analyzer sitting between the DCE/DTE ports.')
 
     args = parser.parse_args()
 
