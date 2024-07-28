@@ -21,6 +21,7 @@ import re
 import sys
 import threading
 import time
+import typing
 
 import serial
 
@@ -169,6 +170,19 @@ def convert_16bytes_to_string(mybytes: bytes, encoding: str) -> str:
     return return_val
 
 
+class IO(typing.NamedTuple):
+    """
+    Tuple of the I/O functions expected by Hexterm
+    """
+    read: typing.Callable
+    write: typing.Callable
+    flush: typing.Callable
+
+def _void( *_ ):
+    return None
+
+NullIO = IO(_void, _void, _void)
+
 class HexTerm:
     """
     Hexterminal main threads and routing.
@@ -179,11 +193,8 @@ class HexTerm:
         self.local_write = None
         self.local_flush = None
         self.local_readline = None
-        self.dce_read = None
-        self.dce_write = None
-        self.dte_read = None
-        self.dte_write = None
-
+        self.dce = None
+        self.dte = None
 
     def local_input_loop(self):
         """
@@ -204,13 +215,15 @@ class HexTerm:
                 print(" t <msg> - In mitm mode, send msg to the 2nd mitm DTE port")
             # DTE Send
             elif line[0].upper() == "T":
-                if self.dte_write is None:
+                if self.dte is None:
                     print("DTE only supported in mitm monitor mode.")
                 else:
-                    self.dte_write(convert_string_to_bytes(line[1:], self.args.encoding))
+                    self.dte.write(convert_string_to_bytes(line[1:], self.args.encoding))
+                    self.dte.flush()
             # DCE Send
             else:
-                self.dce_write(convert_string_to_bytes(line, self.args.encoding))
+                self.dce.write(convert_string_to_bytes(line, self.args.encoding))
+                self.dce.flush()
 
     def serial_input_loop(self, serial_read, serial_write, prefix=""):
         """
@@ -221,12 +234,11 @@ class HexTerm:
             data = bytearray()
             while not self.shutdown.is_set():
                 #time.sleep(1)
-                new_byte = serial_read()
+                new_byte = serial_read.read(16)
                 curr_time = time.time()
-                if (new_byte is None) or (new_byte == b""):
-                    pass
-                else:
-                    serial_write(new_byte)
+                if bool(new_byte):
+                    serial_write.write(new_byte)
+                    serial_write.flush()
                     if len(data) == 0:
                         timestamp = curr_time
                     data = data + new_byte
@@ -241,18 +253,16 @@ class HexTerm:
         Processing loop for the data coming in the DCE serial port
         """
         if self.args.mitm is not None:
-            self.serial_input_loop( self.dce_read, self.dte_write, "T<--C" )
+            self.serial_input_loop( self.dce, self.dte, "T<--C" )
         else:
-            def do_nothing( _ ):
-                pass
-            self.serial_input_loop( self.dce_read, do_nothing )
+            self.serial_input_loop( self.dce, NullIO )
         print("Exiting DCE.")
 
     def dte_input_loop(self):
         """
         Processing loop for the data coming in the DCE serial port
         """
-        self.serial_input_loop( self.dte_read, self.dce_write, "T-->C" )
+        self.serial_input_loop( self.dte, self.dce, "T-->C" )
         print("Exiting DTE.")
 
 
@@ -318,14 +328,7 @@ class HexTerm:
         with serial.Serial(port=self.args.portname, baudrate=self.args.baud, bytesize=bytesize,
         parity=parity, stopbits=stopbits, xonxoff=xonxoff, rtscts=rtscts, dsrdtr=dsrdtr,
         timeout=320/self.args.baud) as dce:
-            def read_dce():
-                return dce.read(16)
-            self.dce_read=read_dce
-
-            def write_dce( mybytes ):
-                dce.write(mybytes)
-                dce.flush()
-            self.dce_write=write_dce
+            self.dce=dce
 
             if self.args.mitm is None:
                 return self.create_local_input_stream()
@@ -334,14 +337,7 @@ class HexTerm:
             with serial.Serial(port=self.args.mitm, baudrate=self.args.baud, bytesize=bytesize,
             parity=parity, stopbits=stopbits, xonxoff=xonxoff, rtscts=rtscts, dsrdtr=dsrdtr,
             timeout=320/self.args.baud) as dte:
-                def read_dte():
-                    return dte.read(16)
-                self.dte_read=read_dte
-
-                def write_dte( mybytes ):
-                    dte.write(mybytes)
-                    dte.flush()
-                self.dte_write=write_dte
+                self.dte=dte
 
                 return self.create_local_input_stream()
         self.shutdown.set()

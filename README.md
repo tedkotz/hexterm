@@ -90,4 +90,4 @@ is probably needed. Here is an example:
 - [ ] Add message timestamps
 - [ ] streamline byte to message group timing
 - [ ] Reduce mitm latency: create separate thread for output formatting
-
+- [ ] replace print with local writes or sys.stderr
