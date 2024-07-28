@@ -88,3 +88,6 @@ is probably needed. Here is an example:
 - [x] Add monitor port for serial protocol analyzer type mitm mode
 - [ ] Add requirements.txt file
 - [ ] Add message timestamps
+- [ ] streamline byte to message group timing
+- [ ] Reduce mitm latency: create separate thread for output formatting
+

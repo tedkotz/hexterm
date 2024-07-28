@@ -112,6 +112,38 @@ def parse_serial_flow_control( arg: str
     return flow_control[0], flow_control[1], flow_control[2]
 
 
+## Input parsing functions #################################################
+
+def convert_string_to_bytes(txt: str, encoding: str) -> bytes:
+    """
+    Convert user input string to raw bytes for sending over the wire
+    """
+    def _extract_bytes(txt: str) -> bytes:
+        if not isinstance(txt, str):
+            return b""
+        txt = txt.lstrip()
+        if txt == "":
+            return b""
+
+        if txt[0] in "0123456789abcdefABCDEF":
+            return bytes.fromhex(txt[0:2]) + _extract_bytes(txt[2:])
+        if "'"==txt[0]:
+            mylist = txt.split(sep="'", maxsplit=3) + [""]
+            return mylist[1].encode(encoding=encoding) + _extract_bytes(mylist[2])
+        if '"'==txt[0]:
+            mylist = txt.split(sep='"', maxsplit=3) + [""]
+            return mylist[1].encode(encoding=encoding) + _extract_bytes(mylist[2])
+        raise ValueError("cannot convert message to bytes")
+
+    try:
+        return _extract_bytes(txt)
+    except UnicodeEncodeError as exception: # encode()
+        print (f"UnicodeEncodeError({exception}) in '{txt.strip()}'")
+    except ValueError as exception: # fromhex() and fall-through _extract_bytes case
+        print (f"ValueError({exception}) in '{txt.strip()}'")
+    return b""
+
+
 ## Output formatting functions #################################################
 
 def make_printable( txt : str, subst: str ="." ) -> str:
@@ -152,34 +184,6 @@ class HexTerm:
         self.dte_read = None
         self.dte_write = None
 
-    def _extract_bytes(self, txt: str ) -> bytes:
-        if not isinstance(txt, str):
-            return b""
-        txt = txt.lstrip()
-        if txt == "":
-            return b""
-
-        if txt[0] in "0123456789abcdefABCDEF":
-            return bytes.fromhex(txt[0:2]) + self._extract_bytes(txt[2:])
-        if "'"==txt[0]:
-            mylist = txt.split(sep="'", maxsplit=3) + [""]
-            return mylist[1].encode(encoding=self.args.encoding) + self._extract_bytes(mylist[2])
-        if '"'==txt[0]:
-            mylist = txt.split(sep='"', maxsplit=3) + [""]
-            return mylist[1].encode(encoding=self.args.encoding) + self._extract_bytes(mylist[2])
-        raise ValueError("cannot convert message to bytes")
-
-    def convert_string_to_bytes(self, txt: str) -> bytes:
-        """
-        Convert user input string to raw bytes for sending over the wire
-        """
-        try:
-            return self._extract_bytes(txt)
-        except UnicodeEncodeError as exception: # encode()
-            print (f"UnicodeEncodeError({exception}) in '{txt.strip()}'")
-        except ValueError as exception: # fromhex() and fall-through _extract_bytes case
-            print (f"ValueError({exception}) in '{txt.strip()}'")
-        return b""
 
     def local_input_loop(self):
         """
@@ -203,10 +207,10 @@ class HexTerm:
                 if self.dte_write is None:
                     print("DTE only supported in mitm monitor mode.")
                 else:
-                    self.dte_write(self.convert_string_to_bytes(line[1:]))
+                    self.dte_write(convert_string_to_bytes(line[1:], self.args.encoding))
             # DCE Send
             else:
-                self.dce_write(self.convert_string_to_bytes(line))
+                self.dce_write(convert_string_to_bytes(line, self.args.encoding))
 
     def serial_input_loop(self, serial_read, serial_write, prefix=""):
         """
