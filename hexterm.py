@@ -386,7 +386,7 @@ def main() -> int:
         help='output is appended to FILENAME')
     parser.add_argument('-m','--mitm', '--monitor',
         metavar='PORT',
-        help='enables "monitor in the middle" mode, for use as a protocol analyzer sitting between the DCE/DTE ports.')
+        help='enables monitor-in-the-middle protocol analyzer mode, repeats data to/from PORT')
 
     args = parser.parse_args()
 
