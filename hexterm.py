@@ -17,6 +17,7 @@ PERFORMANCE OF THIS SOFTWARE.
 '''
 
 import argparse
+import queue
 import re
 import sys
 import threading
@@ -40,6 +41,8 @@ OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.'''
 
 DESCRIPTION = "Raw hexadecimal based terminal emulator for monitoring binary serial interfaces"
+
+START_TIME = time.time()
 
 ## Configuration parsing functions #############################################
 
@@ -183,6 +186,14 @@ def _void( *_ ):
 
 NullIO = IO(_void, _void, _void)
 
+class DataRead(typing.NamedTuple):
+    """
+    Tuple of the fields from serial input loop to local output loop
+    """
+    timestamp: "Time"
+    data: bytes
+
+
 class HexTerm:
     """
     Hexterminal main threads and routing.
@@ -192,7 +203,10 @@ class HexTerm:
         self.shutdown = threading.Event()
         self.local = None
         self.dce = None
+        self.dce_print_queue = queue.Queue()
         self.dte = None
+        self.dte_print_queue = queue.Queue()
+
 
     def local_input_loop(self):
         """
@@ -223,44 +237,80 @@ class HexTerm:
                 self.dce.write(convert_string_to_bytes(line, self.args.encoding))
                 self.dce.flush()
 
-    def serial_input_loop(self, serial_read, serial_write, prefix=""):
+
+
+    def serial_output_loop(self, input_queue, prefix=""):
+        """
+        Processing loop for the data coming from the serial port to the local output
+        """
+        #msg_timeout = (MSG_BYTES * (STARTBIT+DATABITS+PARITY+STOPBITS))/self.args.baud
+        msg_timeout = (16 * 12)/self.args.baud
+        data = bytearray()
+        entry = None
+        curr_time = time.time()
+        start_timestamp = curr_time
+        while True:
+            try:
+                timeout = None if len(data) < 1 else msg_timeout - (curr_time - start_timestamp)
+                entry = input_queue.get(timeout=timeout)
+                curr_time = entry.timestamp
+                if bool(entry.data):
+                    if len(data) < 1:
+                        start_timestamp = curr_time
+                    data = data + entry.data
+            except queue.Empty :
+                curr_time = time.time()
+                entry = None
+            if (len(data) >= 16) or ((len(data) > 0) and
+                                     (curr_time - start_timestamp) > msg_timeout):
+                txt=convert_16bytes_to_string(data[0:16], self.args.encoding)
+                self.local.write(f"@{(start_timestamp - START_TIME) :012.6f} {prefix}  {txt}\n")
+                data = data[16:]
+                start_timestamp = curr_time
+            if entry is not None:
+                input_queue.task_done()
+
+    def dce_output_loop(self):
+        """
+        Processing loop for the data coming from the DCE serial port to the local output
+        """
+        if self.args.mitm is not None:
+            self.serial_output_loop( self.dce_print_queue, "T<--C" )
+        else:
+            self.serial_output_loop( self.dte_print_queue )
+
+    def dte_output_loop(self):
+        """
+        Processing loop for the data coming from the DTE serial port to the local output
+        """
+        self.serial_output_loop( self.dte_print_queue, "T-->C" )
+
+    def serial_input_loop(self, serial_read, serial_write, output_queue):
         """
         Processing loop for the data coming in the serial port
         """
         if serial_read is not None:
-            timestamp = time.time()
-            data = bytearray()
             while not self.shutdown.is_set():
-                #time.sleep(1)
-                new_byte = serial_read.read(16)
-                curr_time = time.time()
-                if bool(new_byte):
-                    serial_write.write(new_byte)
-                    serial_write.flush()
-                    if len(data) == 0:
-                        timestamp = curr_time
-                    data = data + new_byte
-                if (len(data) > 16) or ((len(data) > 0) and (curr_time - timestamp) > 1):
-                    txt=convert_16bytes_to_string(data[0:16], self.args.encoding)
-                    self.local.write(f"{prefix}  {txt}\n")
-                    data = data[16:]
-                    timestamp = curr_time
+                new_bytes = serial_read.read(16)
+                if new_bytes:
+                    serial_write.write(new_bytes)
+                    output_queue.put_nowait( DataRead(time.time(), new_bytes) )
 
     def dce_input_loop(self):
         """
         Processing loop for the data coming in the DCE serial port
         """
         if self.args.mitm is not None:
-            self.serial_input_loop( self.dce, self.dte, "T<--C" )
+            self.serial_input_loop( self.dce, self.dte, self.dce_print_queue)
         else:
-            self.serial_input_loop( self.dce, NullIO )
+            self.serial_input_loop( self.dce, NullIO, self.dce_print_queue)
         print("Exiting DCE.")
 
     def dte_input_loop(self):
         """
         Processing loop for the data coming in the DCE serial port
         """
-        self.serial_input_loop( self.dte, self.dce, "T-->C" )
+        self.serial_input_loop( self.dte, self.dce, self.dte_print_queue)
         print("Exiting DTE.")
 
 
@@ -270,8 +320,12 @@ class HexTerm:
         """
         dte_rx_thread = threading.Thread(target=self.dte_input_loop)
         dce_rx_thread = threading.Thread(target=self.dce_input_loop)
+        dte_print_thread = threading.Thread(target=self.dte_output_loop, daemon=True)
+        dce_print_thread = threading.Thread(target=self.dce_output_loop, daemon=True)
 
         # Start support threads
+        dte_print_thread.start()
+        dce_print_thread.start()
         dte_rx_thread.start()
         dce_rx_thread.start()
 
@@ -283,6 +337,9 @@ class HexTerm:
         # wait for join.
         dte_rx_thread.join()
         dce_rx_thread.join()
+
+        self.dte_print_queue.join()
+        self.dce_print_queue.join()
 
         return 0
 
@@ -316,12 +373,13 @@ class HexTerm:
         # Determine Serial Device Settings
         bytesize, parity, stopbits = parse_serial_framing(self.args.framing)
         xonxoff, rtscts, dsrdtr = parse_serial_flow_control(self.args.flow_control)
-
+        read_timeout = (16 * 12)/self.args.baud
+        #read_timeout = 1
 
         # Create DCE port
         with serial.Serial(port=self.args.portname, baudrate=self.args.baud, bytesize=bytesize,
         parity=parity, stopbits=stopbits, xonxoff=xonxoff, rtscts=rtscts, dsrdtr=dsrdtr,
-        timeout=320/self.args.baud) as dce:
+        timeout=read_timeout) as dce:
             self.dce=dce
 
             if self.args.mitm is None:
@@ -330,7 +388,7 @@ class HexTerm:
             # else Create DTE port, if needed
             with serial.Serial(port=self.args.mitm, baudrate=self.args.baud, bytesize=bytesize,
             parity=parity, stopbits=stopbits, xonxoff=xonxoff, rtscts=rtscts, dsrdtr=dsrdtr,
-            timeout=320/self.args.baud) as dte:
+            timeout=read_timeout) as dte:
                 self.dte=dte
 
                 return self.create_local_input_stream()
@@ -406,6 +464,6 @@ if __name__ == '__main__':
 #  Threads:
 #    local_rx_thread - initial main thread, takes "user" input, parses CLI
 #    dce_rx_thread - takes bytes from DCE, converts to Human readable form
-#    <TBD> dte_rx_thread - takes bytes from DTE in mitm mode, converts to Human readable form
-#    <TBD> output_worker_thread - background thread to take over conversion to Human readable form
+#    dte_rx_thread - takes bytes from DTE in mitm mode, converts to Human readable form
+#    <TBD> 2 output_worker_thread - background thread to take over conversion to Human readable form
 #  1 mutex for each output

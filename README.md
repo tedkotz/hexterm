@@ -87,7 +87,9 @@ is probably needed. Here is an example:
 - [ ] handle single digit bytes when white space separated
 - [x] Add monitor port for serial protocol analyzer type mitm mode
 - [ ] Add requirements.txt file
-- [ ] Add message timestamps
+- [ ] Add message timestamps command line option
 - [ ] streamline byte to message group timing
 - [ ] Reduce mitm latency: create separate thread for output formatting
 - [ ] replace print with local writes or sys.stderr
+- [ ] add protocol grouping options (timeout, separator(newline), regex, size field(1 byte?))
+- [ ] align format more with plantUML sequence diagram in mitm mode
