@@ -1,0 +1,7 @@
+# Requirements file for hexterm
+pyserial>=3.5
+
+# maybe future requirements
+#pyserial
+#prompt_toolkit
+#python>=3.6
