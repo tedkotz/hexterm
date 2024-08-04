@@ -78,18 +78,21 @@ is probably needed. Here is an example:
 - [x] Use serial parameters
 - [x] Add doc strings to all functions
 - [x] Add `help` command
-- [ ] Add `--encoding help`
-- [ ] Add `--flow-control help`
-- [ ] Add `--framing help`
+- [x] Add `--baud help`
+- [x] Add `--encoding help`
+- [x] Add `--flow-control help`
+- [x] Add `--framing help`
 - [ ] Standardize CLI options and descriptions a little (dd, gcc, cu, minicom)
-- [ ] Add I/O processing delay in script modes
-- [ ] Consider using asyncio instead of threads
-- [ ] handle single digit bytes when white space separated
+- [x] Add I/O processing delay in script modes
+- [x] handle single digit bytes when white space separated
 - [x] Add monitor port for serial protocol analyzer type mitm mode
-- [ ] Add requirements.txt file
-- [ ] Add message timestamps command line option
+- [ ] align format more with plantUML sequence diagram in mitm mode (needs timestamp extension to plantUml sequence diagrams)
+- [x] Add requirements.txt file
+- [x] Add message timestamps command line option
+- [x] Reduce mitm latency: create separate thread for output formatting
+- [ ] Consider using asyncio instead of threads
 - [ ] streamline byte to message group timing
-- [ ] Reduce mitm latency: create separate thread for output formatting
-- [ ] replace print with local writes or sys.stderr
 - [ ] add protocol grouping options (timeout, separator(newline), regex, size field(1 byte?))
-- [ ] align format more with plantUML sequence diagram in mitm mode
+- [ ] local echo
+- [ ] build real input syntax parser (regex, BNF, convert_string_to_bytes, local_input_loop)
+- [ ] replace print with local writes or sys.stderr
