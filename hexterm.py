@@ -244,7 +244,11 @@ class HexTerm:
             elif line[0].upper() == "W":
                 try:
                     secs = float(line.split()[1])
-                except:
+                except IndexError:
+                    secs = 1
+                except ValueError:
+                    secs = 1
+                except TypeError:
                     secs = 1
                 time.sleep(secs)
                 print("done.")
@@ -519,8 +523,9 @@ def verify_args_skip_start(args: 'argparse.Namespace') -> bool:
         "Hexterm supports any encoding supportted by your version of python:            \n"
         "    https://docs.python.org/library/codecs.html#standard-encodings             \n"
         "Common alternative selections for encoding include:                            \n"
+        "    cp037    - popular non-ascii EBCDIC encoding from IBM covering latin-1     \n"
         "    ascii    - Old standard 7-bit encoding commonly extended                   \n"
-        "    cp437    - extended ASCII encoding of the original IBM PC (DEFAULT)        \n"
+        "    cp437    - extended ASCII encoding of the original IBM/MS-DOS PC (DEFAULT) \n"
         "    latin-1  - extended ASCII encoding specified in ISO8859-1                  \n"
         "    cp1252   - extended latin-1 encoding, common used on MS Windows            \n"
         "    utf-8    - standard multi-byte encoding that is fully ASCII compatible     \n"
@@ -544,18 +549,26 @@ def verify_args_skip_start(args: 'argparse.Namespace') -> bool:
         "    sw/dtr   - Enables XON/XOFF and DTR/DSR Flow Control                       \n"
         "    all      - Enables all flow control methods                                \n"
         )
-
-
-
         return True
-
 
     return False
 
 def check_baud_type( baud ):
+    """
+    Allows baud to either be an integer or request help
+    """
     if baud.upper() in ['HELP', '?', 'H']:
         return baud
     return int(baud)
+
+
+def print_encoding_table( encoding ):
+    """
+    prints the encoding table for a given encoder.
+    """
+    for i in range(0,256,16):
+        data = bytearray(range(i,i+16))
+        print(convert_16bytes_to_string(data, encoding))
 
 def main() -> int:
     """
