@@ -141,7 +141,6 @@ def convert_string_to_bytes(txt: str, encoding: str) -> bytes:
             return mylist[1].encode(encoding=encoding) + _extract_bytes(mylist[2])
         if '"'==txt[0]:
             mylist = txt.split(sep='"', maxsplit=2) + [""]
-            print(mylist)
             return mylist[1].encode(encoding=encoding) + _extract_bytes(mylist[2])
         # Must be hex digits
         mylist = txt.split(maxsplit=1)+[""]
@@ -150,13 +149,7 @@ def convert_string_to_bytes(txt: str, encoding: str) -> bytes:
             txt = "0"+txt
         return bytes.fromhex(txt) + _extract_bytes(mylist[1])
 
-    try:
-        return _extract_bytes(txt)
-    except UnicodeEncodeError as exception: # encode()
-        print (f"UnicodeEncodeError({exception}) in '{txt.strip()}'")
-    except ValueError as exception: # fromhex() and fall-through _extract_bytes case
-        print (f"ValueError({exception}) in '{txt.strip()}'")
-    return b""
+    return _extract_bytes(txt)
 
 
 ## Output formatting functions #################################################
@@ -204,6 +197,19 @@ class DataRead(typing.NamedTuple):
     timestamp: "Time"
     data: bytes
 
+def wait_cmd(line: str):
+    """
+    Parse and delay a wait command
+    """
+    try:
+        secs = float(line.split()[1])
+    except IndexError:
+        secs = 1
+    except ValueError:
+        secs = 1
+    except TypeError:
+        secs = 1
+    time.sleep(secs)
 
 
 class HexTerm:
@@ -224,48 +230,47 @@ class HexTerm:
         """
         Processing loop for the data coming in locally
         """
+        self.local.write(str(self.args).replace("Namespace","Settings",1))
+        self.local.write("\nType 'quit' to exit\n")
         while not self.shutdown.is_set():
-            line = self.local.read()
-            # EOF or quit
-            if line == "" or line[0].upper() == "Q":
-                self.shutdown.set()
+            try:
+                time.sleep(0.000001)
+                self.local.write("\n> ")
+                line = self.local.read()
+                # EOF or quit
+                if line == "" or line[0].upper() == "Q":
+                    self.shutdown.set()
 
-            # Help
-            elif line[0].upper() in "H?":
-                print(" help    - Print commands")
-                print(" quit    - Exit program")
-                print(" wait X  - Wait for X seconds before continuing")
-                print(' <HEX>   - Send message of raw hexadecimal bytes')
-                print(' "text"  - Send message of decoded text string as bytes')
-                print(" 'text'  - Send message of decoded text string as bytes")
-                print(" t <msg> - In mitm mode, send msg to the 2nd mitm DTE port")
+                # Help
+                elif line[0].upper() in "H?":
+                    self.local.write(" help    - Print commands\n")
+                    self.local.write(" quit    - Exit program\n")
+                    self.local.write(" wait X  - Wait for X seconds before continuing\n")
+                    self.local.write(" <HEX>   - Send message of raw hexadecimal bytes\n")
+                    self.local.write(' "text"  - Send message of decoded text string as bytes\n')
+                    self.local.write(" 'text'  - Send message of decoded text string as bytes\n")
+                    self.local.write(" t <msg> - In mitm mode, send msg to the 2nd mitm DTE port\n")
 
-            # Wait
-            elif line[0].upper() == "W":
-                try:
-                    secs = float(line.split()[1])
-                except IndexError:
-                    secs = 1
-                except ValueError:
-                    secs = 1
-                except TypeError:
-                    secs = 1
-                time.sleep(secs)
-                print("done.")
+                # Wait
+                elif line[0].upper() == "W":
+                    wait_cmd(line)
 
-            # DTE Send
-            elif line[0].upper() == "T":
-                if self.dte is None:
-                    print("DTE only supported in mitm monitor mode.")
+                # DTE Send
+                elif line[0].upper() == "T":
+                    if self.dte is None:
+                        self.local.write("DTE only supported in mitm monitor mode.\n")
+                    else:
+                        self.dte.write(convert_string_to_bytes(line[1:], self.args.encoding))
+                        self.dte.flush()
+
+                # DCE Send
                 else:
-                    self.dte.write(convert_string_to_bytes(line[1:], self.args.encoding))
-                    self.dte.flush()
-
-            # DCE Send
-            else:
-                self.dce.write(convert_string_to_bytes(line, self.args.encoding))
-                self.dce.flush()
-
+                    self.dce.write(convert_string_to_bytes(line, self.args.encoding))
+                    self.dce.flush()
+            except UnicodeEncodeError as exception: # encode()
+                self.local.write (f"UnicodeEncodeError({exception}) in '{line.strip()}'\n")
+            except ValueError as exception: # fromhex() and fall-through _extract_bytes case
+                self.local.write (f"ValueError({exception}) in '{line.strip()}'\n")
 
 
     def serial_output_loop(self, input_queue, prefix=""):
@@ -352,14 +357,14 @@ class HexTerm:
         Processing loop for the data coming in the DCE serial port
         """
         self.serial_input_loop( self.dce, self.dte, self.dce_print_queue)
-        print("Exiting DCE.")
+        self.local.write("Exiting DCE.\n")
 
     def dte_input_loop(self):
         """
         Processing loop for the data coming in the DTE serial port
         """
         self.serial_input_loop( self.dte, self.dce, self.dte_print_queue)
-        print("Exiting DTE.")
+        self.local.write("Exiting DTE.\n")
 
 
     def mainloop(self) -> int:
@@ -380,7 +385,7 @@ class HexTerm:
         # Start Local RX Thread
         self.local_input_loop()
         self.shutdown.set()
-        print("Exiting.")
+        self.local.write("Exiting.\n")
 
         # wait for join.
         dte_rx_thread.join()
@@ -449,8 +454,6 @@ class HexTerm:
         Entry point for passing control to the Hexterm
         """
         self.shutdown.clear()
-        print(str(self.args).replace("Namespace","Settings",1))
-        print("Type 'quit' to exit")
 
         # create Serial Device
         return self.create_serial_ports()
@@ -461,7 +464,7 @@ def verify_args_skip_start(args: 'argparse.Namespace') -> bool:
         returns True if starting the program should be skipped
     '''
     if args.forward and not args.mitm:
-        print('Forwarding cannot be enabled outside of monitor (mitm) mode.')
+        print('Forwarding cannot be enabled outside of monitor (mitm) mode.\n')
         return True
 
     if isinstance(args.baud, str) and args.baud.upper() in ['HELP', '?', 'H']:
@@ -643,5 +646,6 @@ if __name__ == '__main__':
 #    local_rx_thread - initial main thread, takes "user" input, parses CLI
 #    dce_rx_thread - takes bytes from DCE, converts to Human readable form
 #    dte_rx_thread - takes bytes from DTE in mitm mode, converts to Human readable form
-#    <TBD> 2 output_worker_thread - background thread to take over conversion to Human readable form
+#    dce_print_thread - background thread to take over conversion to Human readable form
+#    dte_print_thread - background thread to take over conversion to Human readable form
 #  1 mutex for each output

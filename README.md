@@ -113,7 +113,6 @@ serial ports, though it does still need to monitor and interleave both:
 - [x] Add `--encoding help`
 - [x] Add `--flow-control help`
 - [x] Add `--framing help`
-- [ ] Standardize CLI options and descriptions a little (dd, gcc, cu, minicom)
 - [x] Add I/O processing delay in script modes
 - [x] handle single digit bytes when white space separated
 - [x] Add monitor port for serial protocol analyzer type mitm mode
@@ -124,6 +123,8 @@ serial ports, though it does still need to monitor and interleave both:
 - [ ] Consider using asyncio instead of threads
 - [ ] streamline byte to message group timing
 - [ ] add protocol grouping options (timeout, separator(newline), regex, size field(1 byte?))
-- [ ] local echo
+- [ ] local echo: print what you send with L -> C or T <- L
 - [ ] build real input syntax parser (regex, BNF, convert_string_to_bytes, local_input_loop)
-- [ ] replace print with local writes or sys.stderr
+- [x] replace print with local writes or sys.stderr
+- [ ] add --version
+
