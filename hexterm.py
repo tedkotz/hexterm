@@ -26,6 +26,13 @@ import typing
 
 import serial
 
+try:
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.patch_stdout import patch_stdout
+except ImportError:
+    PromptSession = None
+
+
 LICENSE = '''\
 Copyright (c) 2023 Theodore Kotz <ted@kotz.us>
 
@@ -151,6 +158,13 @@ def convert_string_to_bytes(txt: str, encoding: str) -> bytes:
 
     return _extract_bytes(txt)
 
+if PromptSession is not None:
+    def setup_prompt_session( _: PromptSession ):
+        '''
+        Sets up the PromptSession if prompt toolkit is available
+        '''
+
+
 
 ## Output formatting functions #################################################
 
@@ -231,11 +245,9 @@ class HexTerm:
         Processing loop for the data coming in locally
         """
         self.local.write(str(self.args).replace("Namespace","Settings",1))
-        self.local.write("\nType 'quit' to exit\n")
+        self.local.write("\nType 'help' for a list of commands, 'quit' to exit.\n")
         while not self.shutdown.is_set():
             try:
-                time.sleep(0.000001)
-                self.local.write("\n> ")
                 line = self.local.read()
                 # EOF or quit
                 if line == "" or line[0].upper() == "Q":
@@ -414,7 +426,37 @@ class HexTerm:
         Parses the input settings and then passes control
         """
         if self.args.input == "-":
-            return self.create_local_output_stream(sys.stdin.readline)
+            if not sys.stdin.isatty():
+                promptreadline = sys.stdin.readline
+            elif sys.stdout.isatty():
+                if PromptSession is not None:
+                    with patch_stdout():
+                        session = PromptSession()
+
+                        setup_prompt_session( session )
+
+                        def promptreadline():
+                            try:
+                                return session.prompt("> ") + "\n"
+                            except EOFError:
+                                return ""
+
+                        return self.create_local_output_stream(promptreadline)
+                # else:
+                def promptreadline():
+                    time.sleep(0.01)
+                    try:
+                        return input("\n> ") + "\n"
+                    except EOFError:
+                        return ""
+            elif sys.stderr.isatty():
+                def promptreadline():
+                    sys.stderr.write("\nType 'quit' to exit.\n# ")
+                    return sys.stdin.readline()
+            else:
+                promptreadline = sys.stdin.readline
+
+            return self.create_local_output_stream(promptreadline)
         # else
         with open(self.args.input, "r", encoding="utf-8") as infile:
             return self.create_local_output_stream(infile.readline)
