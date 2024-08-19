@@ -190,8 +190,8 @@ def _hex_completer( text: str ) :
             for j in hexchars:
                 yield (i+j, 0)
     else:
-        _quote_completer( "'", text )
-        _quote_completer( '"', text )
+        yield from _quote_completer( "'", text )
+        yield from _quote_completer( '"', text )
         if text[0].upper() in hexchars:
             if len(text) < 2:
                 i=text[0].upper()
@@ -243,8 +243,8 @@ HextermCommandTokenList = [
     CommandToken( re.compile(r"quit|q|exit|x"),  "quit", None, "Exit program" ),
     CommandToken( re.compile(r"wait|w|sleep|s"), "wait", [None, FloatToken],
         "Wait for X seconds before continuing" ),
-    CommandToken( re.compile(r"dte|t|mitm|m"),    "T", [ByteStreamCommandToken],
-        "In mitm mode, send msg to the 2nd mitm DTE port" ), #TODO: make dte command work
+    CommandToken( re.compile(r"dte|t|mitm|m"),    "t", [ByteStreamCommandToken],
+        "In mitm mode, send msg to the 2nd mitm DTE port" ),
     ByteStreamCommandToken
     ]
 

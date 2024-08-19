@@ -127,4 +127,9 @@ serial ports, though it does still need to monitor and interleave both:
 - [ ] build real input syntax parser (regex, BNF, convert_string_to_bytes, local_input_loop)
 - [x] replace print with local writes or sys.stderr
 - [ ] add --version
+- [ ] make dte command work by name
+- [ ] add validator
+- [ ] add parser
+- [ ] print enconding table command
+
 
