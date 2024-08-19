@@ -28,7 +28,9 @@ import serial
 
 try:
     from prompt_toolkit import PromptSession
+    from prompt_toolkit.completion import Completer, Completion
     from prompt_toolkit.patch_stdout import patch_stdout
+    from prompt_toolkit.shortcuts import CompleteStyle
 except ImportError:
     PromptSession = None
 
@@ -158,11 +160,153 @@ def convert_string_to_bytes(txt: str, encoding: str) -> bytes:
 
     return _extract_bytes(txt)
 
+
+floatchars = (
+    (re.compile(r"[+-]?\d+(?:\.\d+)?"), "eE"),
+    (re.compile(r"|[+-]?\d+(?:\.\d+)?[eE]"), "+-"),
+    (re.compile(r"[+-]?\d+"), "."),
+    (re.compile(r"[+-]?\d*|[+-]?\d+\.\d*|[+-]?\d+(?:\.\d+)?[eE][+-]?\d*"), "0123456789"),
+    )
+def _float_completer( text: str ) -> 'Iterable':
+    for charset in floatchars:
+        if charset[0].fullmatch(text):
+            for char in charset[1]:
+                yield (char, 0)
+
+def _quote_completer( quote: str,  text: str ) :
+    if text[0] == quote:
+        strsplit = text[1:].split(sep=quote, maxsplit=1)
+        if len(strsplit) < 2:
+            yield (quote, 0)
+        elif strsplit[1] != "":
+            yield from _hex_completer( strsplit[1].lstrip() )
+
+def _hex_completer( text: str ) :
+    hexchars = "01234567899ABCDEF"
+    if text is None or len(text) < 1:
+        yield( '"', 0)
+        yield( "'", 0)
+        for i in hexchars:
+            for j in hexchars:
+                yield (i+j, 0)
+    else:
+        _quote_completer( "'", text )
+        _quote_completer( '"', text )
+        if text[0].upper() in hexchars:
+            if len(text) < 2:
+                i=text[0].upper()
+                for j in hexchars:
+                    yield (i+j, -1)
+            elif text[1].upper() in hexchars:
+                yield from _hex_completer( text[2:].lstrip() )
+
+
+def _check_cmd_starts_with ( txt, check1, check_list ):
+    if check1.startswith(txt):
+        return True
+    for val in check_list:
+        if val.startswith(txt):
+            return True
+    return False
+
+
+class CommandToken(typing.NamedTuple):
+    """
+    Tuple of the descriptors of part of a command
+    """
+    pattern: str| re.Pattern
+    complete: str| typing.Callable
+    next: 'None|list[CommandToken|None]' = None
+    help: str = "No Description"
+    alias: None| str = None
+
+
+FloatToken = CommandToken(
+    re.compile( r"([+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)" ),
+    _float_completer,
+    None,
+    "a real number"
+    )
+
+ByteStreamCommandTokenNext = [None]
+ByteStreamCommandToken = CommandToken(
+    re.compile( r"((?:[0123456789abcdefABCDEF][0123456789abcdefABCDEF])+|'[^']*'"+r'|"[^"]*")' ),
+    _hex_completer,
+    ByteStreamCommandTokenNext,
+    "a string of bytes in hex digits or quoted characters"
+    )
+ByteStreamCommandTokenNext.append(ByteStreamCommandToken)
+
+HextermCommandTokenList = [
+    None,
+    CommandToken( re.compile(r"help|h|\?"),      "help", None, "Print commands" ),
+    CommandToken( re.compile(r"quit|q|exit|x"),  "quit", None, "Exit program" ),
+    CommandToken( re.compile(r"wait|w|sleep|s"), "wait", [None, FloatToken],
+        "Wait for X seconds before continuing" ),
+    CommandToken( re.compile(r"dte|t|mitm|m"),    "T", [ByteStreamCommandToken],
+        "In mitm mode, send msg to the 2nd mitm DTE port" ), #TODO: make dte command work
+    ByteStreamCommandToken
+    ]
+
+def _command_token_list_completer( commands: list[CommandToken], text: str):
+    if commands is not None:
+        for command in commands:
+            yield from _command_token_completer(command, text)
+
+def _command_token_completer( cmd: CommandToken, text: str):
+    if cmd is not None:
+        # partial command completion
+        simple_reply=None
+        if isinstance(cmd.complete, str):
+            #simple_reply = cmd.complete + (" " if cmd.next is not None else "")
+            simple_reply = cmd.complete
+            if simple_reply.startswith(text.lstrip()) and simple_reply != text:
+                yield (simple_reply, -len(text))
+                simple_reply=None # Don't need to list the simple reply again
+        else:
+            yield from cmd.complete( text )
+
+        # full command match next completion
+        pattern = cmd.pattern
+        if not isinstance(pattern, re.Pattern):
+            pattern = re.compile(pattern)
+        match = pattern.match(text)
+        if match is not None:
+            rest = text[ match.end():]
+            if simple_reply is not None and rest.lstrip() == "" and text !=  simple_reply + " ":
+                yield (simple_reply, -len(text))
+            if rest != rest.lstrip():
+                yield from _command_token_list_completer(cmd.next, rest.lstrip())
+
+def _command_token_list_validator( _commands: list[CommandToken], _text: str ) ->  None|str :
+    ...
+
+def _command_token_list_help( _commands: list[CommandToken] ) ->  None|str :
+    ...
+
+
 if PromptSession is not None:
-    def setup_prompt_session( _: PromptSession ):
+    class HexTermCustomCompleter(Completer):
+        '''
+        A custom completer for use with hexterm CLI
+        '''
+
+        def get_completions(self, document, complete_event):
+            '''
+            Generator for valid completions of the currently typed text
+            '''
+            for val in _command_token_list_completer(HextermCommandTokenList,
+                document.text[0:document.cursor_position] ):
+                yield Completion(val[0], start_position=val[1])
+
+
+    def setup_prompt_session():
         '''
         Sets up the PromptSession if prompt toolkit is available
         '''
+        return PromptSession(
+            completer = HexTermCustomCompleter() ,
+            complete_style=CompleteStyle.MULTI_COLUMN)
 
 
 
@@ -431,9 +575,7 @@ class HexTerm:
             elif sys.stdout.isatty():
                 if PromptSession is not None:
                     with patch_stdout():
-                        session = PromptSession()
-
-                        setup_prompt_session( session )
+                        session = setup_prompt_session()
 
                         def promptreadline():
                             try:
