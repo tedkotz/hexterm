@@ -31,6 +31,7 @@ try:
     from prompt_toolkit.completion import Completer, Completion
     from prompt_toolkit.patch_stdout import patch_stdout
     from prompt_toolkit.shortcuts import CompleteStyle
+    from prompt_toolkit.validation import Validator, ValidationError
 except ImportError:
     PromptSession = None
 
@@ -225,7 +226,8 @@ FloatToken = CommandToken(
     re.compile( r"([+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)" ),
     _float_completer,
     None,
-    "a real number"
+    "a real number",
+    "X"
     )
 
 ByteStreamCommandTokenNext = [None]
@@ -233,7 +235,8 @@ ByteStreamCommandToken = CommandToken(
     re.compile( r"((?:[0123456789abcdefABCDEF][0123456789abcdefABCDEF])+|'[^']*'"+r'|"[^"]*")' ),
     _hex_completer,
     ByteStreamCommandTokenNext,
-    "a string of bytes in hex digits or quoted characters"
+    "a string of bytes in hex digits or quoted characters",
+    "<ByteStream>"
     )
 ByteStreamCommandTokenNext.append(ByteStreamCommandToken)
 
@@ -248,10 +251,13 @@ HextermCommandTokenList = [
     ByteStreamCommandToken
     ]
 
-def _command_token_list_completer( commands: list[CommandToken], text: str):
-    if commands is not None:
-        for command in commands:
-            yield from _command_token_completer(command, text)
+def _command_token_match_pattern(cmd: CommandToken, text: str):
+    if cmd is not None:
+        pattern = cmd.pattern
+        if not isinstance(pattern, re.Pattern):
+            pattern = re.compile(pattern)
+        return pattern.match(text)
+    return None
 
 def _command_token_completer( cmd: CommandToken, text: str):
     if cmd is not None:
@@ -267,10 +273,7 @@ def _command_token_completer( cmd: CommandToken, text: str):
             yield from cmd.complete( text )
 
         # full command match next completion
-        pattern = cmd.pattern
-        if not isinstance(pattern, re.Pattern):
-            pattern = re.compile(pattern)
-        match = pattern.match(text)
+        match=_command_token_match_pattern(cmd , text)
         if match is not None:
             rest = text[ match.end():]
             if simple_reply is not None and rest.lstrip() == "" and text !=  simple_reply + " ":
@@ -278,11 +281,56 @@ def _command_token_completer( cmd: CommandToken, text: str):
             if rest != rest.lstrip():
                 yield from _command_token_list_completer(cmd.next, rest.lstrip())
 
-def _command_token_list_validator( _commands: list[CommandToken], _text: str ) ->  None|str :
-    ...
+def _command_token_list_completer( commands: list[CommandToken], text: str):
+    if commands is not None:
+        for command in commands:
+            yield from _command_token_completer(command, text)
 
-def _command_token_list_help( _commands: list[CommandToken] ) ->  None|str :
-    ...
+def _command_token_validator( cmd: CommandToken, text: str ) ->  bool|str :
+    if cmd is None:
+        if "" == text.lstrip():
+            return True
+    else:
+        # full command match next completion
+        match=_command_token_match_pattern(cmd , text)
+        if match is not None:
+            rest = text[ match.end():]
+            if isinstance(cmd.next, list):
+                return _command_token_list_validator(cmd.next, rest.lstrip())
+            return_val = _command_token_validator(cmd.next, rest.lstrip())
+            if return_val:
+                return return_val
+            return f"Syntax Error. ({text})"
+    return False
+
+def _command_token_list_validator( commands: list[CommandToken], text: str ) ->  bool|str :
+    if commands is None:
+        if "" == text.lstrip():
+            return True
+        return f"Unexpected input at end of command({text})"
+
+    for command in commands:
+        return_val = _command_token_validator( command, text)
+        if return_val:
+            return return_val
+
+    return f"Syntax List Error. ({text})"
+
+
+def _command_token_list_help( commands: list[CommandToken] ) ->  None|str :
+    return_val = ""
+    if commands is not None:
+        for command in commands:
+            if command is not None:
+                if isinstance(command.alias, str):
+                    return_val += f" {command.alias} - {command.help}\n"
+                elif isinstance(command.complete, str):
+                    return_val += f" {command.complete} - {command.help}\n"
+                else:
+                    return_val += f" {command.help}\n"
+    return return_val
+
+
 
 
 if PromptSession is not None:
@@ -299,12 +347,26 @@ if PromptSession is not None:
                 document.text[0:document.cursor_position] ):
                 yield Completion(val[0], start_position=val[1])
 
+    class HexTermValidator(Validator):
+        '''
+        A custom validator for use with hexterm CLI
+        '''
+        def validate(self, document):
+            return_val=_command_token_list_validator(HextermCommandTokenList,
+                                                     document.text.lstrip())
+            if isinstance(return_val, str):
+                raise ValidationError(message=return_val)
+            if not return_val:
+                raise ValidationError(message="Unknown Validation Error")
+
 
     def setup_prompt_session():
         '''
         Sets up the PromptSession if prompt toolkit is available
         '''
         return PromptSession(
+            validator = HexTermValidator(),
+            validate_while_typing=False,
             completer = HexTermCustomCompleter() ,
             complete_style=CompleteStyle.MULTI_COLUMN)
 
@@ -399,13 +461,7 @@ class HexTerm:
 
                 # Help
                 elif line[0].upper() in "H?":
-                    self.local.write(" help    - Print commands\n")
-                    self.local.write(" quit    - Exit program\n")
-                    self.local.write(" wait X  - Wait for X seconds before continuing\n")
-                    self.local.write(" <HEX>   - Send message of raw hexadecimal bytes\n")
-                    self.local.write(' "text"  - Send message of decoded text string as bytes\n')
-                    self.local.write(" 'text'  - Send message of decoded text string as bytes\n")
-                    self.local.write(" t <msg> - In mitm mode, send msg to the 2nd mitm DTE port\n")
+                    self.local.write(_command_token_list_help(HextermCommandTokenList))
 
                 # Wait
                 elif line[0].upper() == "W":
