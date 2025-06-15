@@ -1,7 +1,9 @@
 # Requirements file for hexterm
+# Requires python version 3.9
+# python_version >= "3.9"
+
+# Base dependencies
 pyserial>=3.5
 
-# maybe future requirements
-#pyserial
-#prompt_toolkit
-#python>=3.6
+# Optional dependencies
+# prompt_toolkit [for full UI experience]

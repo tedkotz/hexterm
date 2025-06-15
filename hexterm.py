@@ -79,7 +79,7 @@ def determine_serial_parity( arg: str ) -> 'serial.Parity':
     """
     Converts command line serial parity bit type to a serial Parity configuration
     """
-    return PARITIES.get(arg, serial.PARITY_NONE)
+    return PARITIES.get(arg.upper(), serial.PARITY_NONE)
 
 STOPBITS = {
     "1":serial.STOPBITS_ONE,
@@ -813,14 +813,16 @@ def print_encoding_table( encoding ):
         data = bytearray(range(i,i+16))
         print(convert_16bytes_to_string(data, encoding))
 
+
+
 def main() -> int:
     """
     Global main for hexterm
     """
     parser = argparse.ArgumentParser(
-                    formatter_class=argparse.RawDescriptionHelpFormatter,
-                    description = DESCRIPTION,
-                    epilog = LICENSE)
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description = DESCRIPTION,
+        epilog = LICENSE)
 
     parser.add_argument('portname',
         metavar='PORT',
@@ -843,22 +845,23 @@ def main() -> int:
     parser.add_argument('-o','--output',
         metavar='FILENAME',            default="-",
         help='output is appended to FILENAME')
+
     parser.add_argument('-m','--mitm', '--monitor',
         metavar='PORT',
         help='enables monitor-in-the-middle protocol analyzer mode, repeats data to/from PORT')
 
-    parser.set_defaults(forward=None)
-    parser.add_argument('--nf', '--no-f', '--no-forwarding',
-        dest='forward', action='store_false',
+    parser.add_argument('--nf', '--no-f', '--no-forwarding', '--no-forward',
+        dest='forward', default=None, action='store_false',
         help='turns off the mitm forwarding. useful for split cable operation')
+#    parser.add_argument('--f', '--forward', '--forwarding',
+#        dest='forward', default=None,
+#        action=argparse.BooleanOptionalAction,
+#        help='turns on/off the mitm forwarding. useful for split cable operation')
 
     parser.set_defaults(timestamp=None)
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument('--ts', '--timestamp',
-        dest='timestamp', action='store_true',
-        help='')
-    group.add_argument('--no-ts', '--no-timestamp',
-        dest='timestamp', action='store_false',
+    parser.add_argument('--ts', '--timestamp',
+        dest='timestamp', default=None,
+        action=argparse.BooleanOptionalAction,
         help='turns on/off prepending of timestamps to the entries')
 
     args = parser.parse_args()

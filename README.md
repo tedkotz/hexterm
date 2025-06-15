@@ -95,9 +95,9 @@ serial ports, though it does still need to monitor and interleave both:
 ```
 
 ## Dependencies
-- python3
+- python3 >= 3.9
 - pyserial
-- Maybe prompt_toolkit
+- Optional: prompt_toolkit -- for advanced UI features
 
 ## ToDo
 - [x] Input thread
